@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	uploadDir  = "./uploads"
-	staticDir  = "./static"
+	uploadDir  = "/home/pragadeesh/Videos/"
+	staticDir  = "/home/pragadeesh/Documents/file-transfer/static"
 	serverPort = "1234"
 )
 
@@ -32,7 +32,7 @@ func main() {
 	http.HandleFunc("/upload", uploadHandler)              // handle uploads
 	http.Handle("/files/", http.StripPrefix("/files/",     // serve saved files
 		http.FileServer(http.Dir(uploadDir))))
-	http.HandleFunc("/api/files", filesAPIHandler)    // JSON file list
+	http.HandleFunc("/api/files", filesAPIHandler)           // JSON file list
 	http.HandleFunc("/api/network-info", networkInfoHandler) // Network information
 
 	// 3) Print access URLs + QR code
@@ -118,16 +118,16 @@ func getLocalIP() string {
 func networkInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// Get client IP
 	clientIP := getClientIP(r)
-	
+
 	// Get server IP
 	serverIP := getLocalIP()
 	if serverIP == "" {
 		serverIP = "localhost"
 	}
-	
+
 	// Get network interface information
 	networkInterface := getNetworkInterface()
-	
+
 	networkInfo := map[string]interface{}{
 		"clientIP":         clientIP,
 		"serverIP":         serverIP,
@@ -136,7 +136,7 @@ func networkInfoHandler(w http.ResponseWriter, r *http.Request) {
 		"networkInterface": networkInterface,
 		"connectionType":   "TCP",
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(networkInfo)
 }
@@ -150,13 +150,13 @@ func getClientIP(r *http.Request) string {
 		ips := strings.Split(xForwardedFor, ",")
 		return strings.TrimSpace(ips[0])
 	}
-	
+
 	// Check X-Real-IP header
 	xRealIP := r.Header.Get("X-Real-IP")
 	if xRealIP != "" {
 		return xRealIP
 	}
-	
+
 	// Fall back to RemoteAddr
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -171,24 +171,24 @@ func getNetworkInterface() string {
 	if err != nil {
 		return "unknown"
 	}
-	
+
 	for _, iface := range interfaces {
 		// Skip loopback and down interfaces
 		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
 			continue
 		}
-		
+
 		addrs, err := iface.Addrs()
 		if err != nil {
 			continue
 		}
-		
+
 		for _, addr := range addrs {
 			if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil {
 				return fmt.Sprintf("%s (%s)", iface.Name, ipnet.IP.String())
 			}
 		}
 	}
-	
+
 	return "unknown"
 }
