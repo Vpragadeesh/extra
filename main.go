@@ -1,92 +1,98 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"github.com/gofiber/fiber/v2"
 	"github.com/mdp/qrterminal/v3"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 const (
-	uploadDir  = "/home/pragadeesh/Videos/"
-	staticDir  = "/home/pragadeesh/Documents/file-transfer/static"
-	serverPort = "1234"
+	uploaddir  = "/home/pragadeesh/Videos/"
+	staticdir  = "/home/pragadeesh/Documents/file-transfer/static"
+	serverport = "1234"
 )
 
 func main() {
 	// 1) Ensure uploads directory exists
-	if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
-		if err := os.Mkdir(uploadDir, 0755); err != nil {
+	if _, err := os.Stat(uploaddir); os.IsNotExist(err) {
+		if err := os.Mkdir(uploaddir, 0755); err != nil {
 			fmt.Fprintf(os.Stderr, "Error creating upload directory: %v\n", err)
 			os.Exit(1)
 		}
 	}
 
-	// 2) Routes
-	http.Handle("/", http.FileServer(http.Dir(staticDir))) // single‑page UI
-	http.HandleFunc("/upload", uploadHandler)              // handle uploads
-	http.Handle("/files/", http.StripPrefix("/files/",     // serve saved files
-		http.FileServer(http.Dir(uploadDir))))
-	http.HandleFunc("/api/files", filesAPIHandler)           // JSON file list
-	http.HandleFunc("/api/network-info", networkInfoHandler) // Network information
+	// 2) Fiber app & routes
+	app := fiber.New()
+
+	// Serve SPA static files (index.html)
+	app.Static("/", staticdir, fiber.Static{
+		Index: "index.html",
+	})
+
+	// Serve uploaded files under /files/*
+	app.Static("/files", uploaddir)
+
+	// Upload endpoint
+	app.Post("/upload", uploadHandler)
+
+	// JSON API endpoints
+	app.Get("/api/files", filesAPIHandler)
+	app.Get("/api/network-info", networkInfoHandler)
 
 	// 3) Print access URLs + QR code
 	ip := getLocalIP()
 	fmt.Println("Server started at:")
-	fmt.Printf("→ http://localhost:%s/\n", serverPort)
+	fmt.Printf("→ http://localhost:%s/\n", serverport)
 	if ip != "" {
-		url := fmt.Sprintf("http://%s:%s/", ip, serverPort)
+		url := fmt.Sprintf("http://%s:%s/", ip, serverport)
 		fmt.Printf("→ %s\n", url)
 		qrterminal.Generate(url, qrterminal.L, os.Stdout)
 	}
 
-	// 4) Start HTTP server
-	if err := http.ListenAndServe(":"+serverPort, nil); err != nil {
+	// 4) Start Fiber server
+	if err := app.Listen(":" + serverport); err != nil {
 		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-// uploadHandler saves an incoming file then redirects back to “/”
-func uploadHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		return
-	}
-	file, header, err := r.FormFile("file")
+// uploadHandler saves an incoming file then redirects back to "/"
+func uploadHandler(c *fiber.Ctx) error {
+	fileHeader, err := c.FormFile("file")
 	if err != nil {
-		http.Error(w, "Error reading file: "+err.Error(), http.StatusBadRequest)
-		return
+		return c.Status(fiber.StatusBadRequest).SendString("Error reading file: " + err.Error())
 	}
-	defer file.Close()
 
-	dstPath := filepath.Join(uploadDir, filepath.Base(header.Filename))
+	src, err := fileHeader.Open()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString("Error opening uploaded file: " + err.Error())
+	}
+	defer src.Close()
+
+	dstPath := filepath.Join(uploaddir, filepath.Base(fileHeader.Filename))
 	dst, err := os.Create(dstPath)
 	if err != nil {
-		http.Error(w, "Unable to create file: "+err.Error(), http.StatusInternalServerError)
-		return
+		return c.Status(fiber.StatusInternalServerError).SendString("Unable to create file: " + err.Error())
 	}
 	defer dst.Close()
 
-	if _, err := io.Copy(dst, file); err != nil {
-		http.Error(w, "Error saving file: "+err.Error(), http.StatusInternalServerError)
-		return
+	if _, err := io.Copy(dst, src); err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString("Error saving file: " + err.Error())
 	}
 
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	return c.Redirect("/", fiber.StatusSeeOther)
 }
 
 // filesAPIHandler returns the list of uploaded filenames as JSON
-func filesAPIHandler(w http.ResponseWriter, r *http.Request) {
-	entries, err := os.ReadDir(uploadDir)
+func filesAPIHandler(c *fiber.Ctx) error {
+	entries, err := os.ReadDir(uploaddir)
 	if err != nil {
-		http.Error(w, "Unable to read uploads: "+err.Error(), http.StatusInternalServerError)
-		return
+		return c.Status(fiber.StatusInternalServerError).SendString("Unable to read uploads: " + err.Error())
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -94,8 +100,7 @@ func filesAPIHandler(w http.ResponseWriter, r *http.Request) {
 			names = append(names, e.Name())
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(names)
+	return c.JSON(names)
 }
 
 // getLocalIP finds the first non-loopback IPv4 address
@@ -115,54 +120,45 @@ func getLocalIP() string {
 }
 
 // networkInfoHandler returns network information as JSON
-func networkInfoHandler(w http.ResponseWriter, r *http.Request) {
-	// Get client IP
-	clientIP := getClientIP(r)
-
-	// Get server IP
+func networkInfoHandler(c *fiber.Ctx) error {
+	clientIP := getClientIP(c)
 	serverIP := getLocalIP()
 	if serverIP == "" {
 		serverIP = "localhost"
 	}
-
-	// Get network interface information
 	networkInterface := getNetworkInterface()
 
 	networkInfo := map[string]interface{}{
 		"clientIP":         clientIP,
 		"serverIP":         serverIP,
-		"serverPort":       serverPort,
+		"serverPort":       serverport,
 		"protocol":         "HTTP/TCP",
 		"networkInterface": networkInterface,
 		"connectionType":   "TCP",
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(networkInfo)
+	return c.JSON(networkInfo)
 }
 
-// getClientIP extracts the client IP from the request
-func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header
-	xForwardedFor := r.Header.Get("X-Forwarded-For")
+// getClientIP extracts the client IP from the fiber context
+func getClientIP(c *fiber.Ctx) string {
+	xForwardedFor := c.Get("X-Forwarded-For")
 	if xForwardedFor != "" {
-		// X-Forwarded-For can contain multiple IPs, take the first one
 		ips := strings.Split(xForwardedFor, ",")
 		return strings.TrimSpace(ips[0])
 	}
 
-	// Check X-Real-IP header
-	xRealIP := r.Header.Get("X-Real-IP")
+	xRealIP := c.Get("X-Real-IP")
 	if xRealIP != "" {
 		return xRealIP
 	}
 
-	// Fall back to RemoteAddr
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+	// fiber.Ctx.IP() will try headers and remote address
+	if ip := c.IP(); ip != "" {
+		return ip
 	}
-	return ip
+
+	return "unknown"
 }
 
 // getNetworkInterface returns information about the active network interface
@@ -173,7 +169,6 @@ func getNetworkInterface() string {
 	}
 
 	for _, iface := range interfaces {
-		// Skip loopback and down interfaces
 		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
 			continue
 		}
