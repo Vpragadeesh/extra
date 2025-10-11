@@ -2,25 +2,26 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" href="/localsend.png" type="image/png" />
-    <title>📤 File Transfer</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📤</text></svg>" />
+    <title>📤 LocalShare - File Transfer</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
       body {
         font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-        background: linear-gradient(
-          135deg,
-          #0f0f0f 0%,
-          #1a1a1a 50%,
-          #252525 100%
-        );
+        background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 50%, #252525 100%);
         margin: 0;
         padding: 0;
         min-height: 100vh;
       }
 
       .container {
-        max-width: 900px;
+        max-width: 1200px;
         margin: 50px auto;
         background-color: #1e1e1e;
         border-radius: 16px;
@@ -40,38 +41,69 @@
         min-width: 300px;
       }
 
-      h1,
-      h2 {
+      h1, h2 {
         color: #e2e8f0;
         margin-bottom: 20px;
         font-size: 1.6em;
         text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
       }
 
-      form {
-        display: flex;
-        flex-direction: column;
-        gap: 15px;
+      .drop-zone {
+        border: 2px dashed #555555;
+        background-color: #2a2a2a;
+        border-radius: 8px;
+        padding: 40px 20px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s;
+        margin-bottom: 15px;
+      }
+
+      .drop-zone:hover,
+      .drop-zone.drag-over {
+        background-color: #353535;
+        border-color: #3b82f6;
+        box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+      }
+
+      .drop-zone-icon {
+        font-size: 48px;
+        margin-bottom: 10px;
+      }
+
+      .drop-zone-text {
+        color: #e2e8f0;
+        font-size: 16px;
+        margin-bottom: 5px;
+      }
+
+      .drop-zone-hint {
+        color: #94a3b8;
+        font-size: 12px;
       }
 
       input[type="file"] {
+        display: none;
+      }
+
+      .selected-file {
+        margin-top: 10px;
         padding: 10px;
-        border: 2px dashed #555555;
-        background-color: #2a2a2a;
-        color: #e2e8f0;
+        background: #2a2a2a;
         border-radius: 8px;
-        cursor: pointer;
-        transition: all 0.3s;
+        color: #e2e8f0;
+        font-size: 14px;
+        display: none;
+        border: 1px solid #404040;
       }
 
-      input[type="file"]:hover {
-        background-color: #353535;
-        border-color: #777777;
-        box-shadow: 0 0 10px rgba(255, 255, 255, 0.15);
+      .selected-file.show {
+        display: block;
       }
 
-      input[type="submit"] {
-        padding: 12px;
+      input[type="submit"],
+      .btn {
+        padding: 12px 24px;
         background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
         color: white;
         border: none;
@@ -80,19 +112,37 @@
         cursor: pointer;
         transition: all 0.3s ease;
         box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+        width: 100%;
+        margin-top: 10px;
       }
 
-      input[type="submit"]:hover {
+      input[type="submit"]:hover,
+      .btn:hover {
         background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
         transform: translateY(-2px);
         box-shadow: 0 6px 12px rgba(59, 130, 246, 0.4);
       }
 
-      input[type="submit"]:disabled {
+      input[type="submit"]:disabled,
+      .btn:disabled {
         background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
         cursor: not-allowed;
         transform: none;
         box-shadow: none;
+      }
+
+      .btn-danger {
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        box-shadow: 0 4px 8px rgba(239, 68, 68, 0.3);
+        padding: 6px 12px;
+        font-size: 12px;
+        margin: 0;
+        width: auto;
+      }
+
+      .btn-danger:hover {
+        background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+        box-shadow: 0 6px 12px rgba(239, 68, 68, 0.4);
       }
 
       .progress-container {
@@ -112,12 +162,7 @@
 
       .progress-fill {
         height: 100%;
-        background: linear-gradient(
-          90deg,
-          #3b82f6 0%,
-          #06b6d4 50%,
-          #10b981 100%
-        );
+        background: linear-gradient(90deg, #3b82f6 0%, #06b6d4 50%, #10b981 100%);
         width: 0%;
         transition: width 0.3s ease;
         border-radius: 10px;
@@ -245,6 +290,33 @@
         stroke-linejoin: round;
       }
 
+      .stats-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 10px;
+        margin-bottom: 20px;
+      }
+
+      .stat-card {
+        background: #2a2a2a;
+        padding: 15px 10px;
+        border-radius: 8px;
+        border: 1px solid #404040;
+        text-align: center;
+      }
+
+      .stat-value {
+        font-size: 22px;
+        font-weight: bold;
+        color: #3b82f6;
+        margin-bottom: 5px;
+      }
+
+      .stat-label {
+        font-size: 11px;
+        color: #94a3b8;
+      }
+
       /* Light theme overrides */
       body.light-theme {
         background: linear-gradient(to right, #74ebd5, #acb6e5);
@@ -262,24 +334,40 @@
         text-shadow: none;
       }
 
-      body.light-theme input[type="file"] {
+      body.light-theme .drop-zone {
         background-color: #ecf6fc;
-        color: #2c3e50;
         border-color: #3498db;
       }
 
-      body.light-theme input[type="file"]:hover {
+      body.light-theme .drop-zone:hover,
+      body.light-theme .drop-zone.drag-over {
         background-color: #d0e7fa;
         border-color: #2980b9;
-        box-shadow: none;
+        box-shadow: 0 0 20px rgba(52, 152, 219, 0.3);
       }
 
-      body.light-theme input[type="submit"] {
+      body.light-theme .drop-zone-text {
+        color: #2c3e50;
+      }
+
+      body.light-theme .drop-zone-hint {
+        color: #555;
+      }
+
+      body.light-theme .selected-file {
+        background: #f8f9fa;
+        color: #2c3e50;
+        border-color: #ddd;
+      }
+
+      body.light-theme input[type="submit"],
+      body.light-theme .btn {
         background: linear-gradient(to right, #3498db, #2ecc71);
         box-shadow: none;
       }
 
-      body.light-theme input[type="submit"]:hover {
+      body.light-theme input[type="submit"]:hover,
+      body.light-theme .btn:hover {
         background: linear-gradient(to right, #2ecc71, #3498db);
         transform: none;
         box-shadow: none;
@@ -331,6 +419,15 @@
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         border: none;
+      }
+
+      body.light-theme .stat-card {
+        background: #f9f9f9;
+        border: 1px solid #e0e0e0;
+      }
+
+      body.light-theme .stat-value {
+        color: #3498db;
       }
 
       body.light-theme .upload-status.success {
@@ -412,7 +509,7 @@
 
       li {
         background: #2a2a2a;
-        padding: 10px 15px;
+        padding: 12px 15px;
         border-radius: 8px;
         margin-bottom: 10px;
         box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
@@ -431,33 +528,35 @@
         box-shadow: 0 4px 10px rgba(0, 0, 0, 0.6);
       }
 
-      .file-name {
-        color: #e2e8f0;
+      .file-info {
         flex: 1;
         min-width: 0;
+      }
+
+      .file-name {
+        color: #e2e8f0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
         font-size: 14px;
         line-height: 1.4;
-        margin-right: 8px;
+        margin-bottom: 4px;
       }
 
-      .file-name:hover {
-        white-space: normal;
-        word-break: break-all;
-        overflow: visible;
-        background: rgba(255, 255, 255, 0.1);
-        padding: 4px 6px;
-        border-radius: 4px;
-        margin: -4px -6px;
-        z-index: 10;
-        position: relative;
+      .file-meta {
+        font-size: 11px;
+        color: #94a3b8;
       }
 
-      .download-btn {
+      .file-actions {
+        display: flex;
+        gap: 8px;
         flex-shrink: 0;
-        min-width: 80px;
+      }
+
+      .download-btn, .delete-btn {
+        flex-shrink: 0;
+        min-width: 70px;
         text-align: center;
       }
 
@@ -465,9 +564,11 @@
         color: #06b6d4;
         text-decoration: none;
         font-weight: 500;
-        padding: 4px 8px;
+        padding: 6px 12px;
         border-radius: 4px;
         transition: all 0.3s;
+        font-size: 12px;
+        display: inline-block;
       }
 
       a:hover {
@@ -476,14 +577,44 @@
         text-decoration: none;
       }
 
+      .search-container {
+        margin-bottom: 15px;
+      }
+
+      .search-input {
+        width: 100%;
+        padding: 10px 15px;
+        background: #2a2a2a;
+        border: 1px solid #404040;
+        border-radius: 8px;
+        color: #e2e8f0;
+        font-size: 14px;
+      }
+
+      .search-input:focus {
+        outline: none;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+      }
+
+      body.light-theme .search-input {
+        background: #f8f9fa;
+        border-color: #ddd;
+        color: #2c3e50;
+      }
+
+      body.light-theme .search-input:focus {
+        border-color: #3498db;
+        box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+      }
+
       @media screen and (max-width: 768px) {
         .container {
           flex-direction: column;
           margin: 20px;
         }
 
-        h1,
-        h2 {
+        h1, h2 {
           font-size: 1.4em;
           text-align: center;
         }
@@ -491,13 +622,21 @@
         input[type="submit"] {
           font-size: 18px;
         }
+
+        .stats-container {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .file-actions {
+          flex-direction: column;
+          gap: 5px;
+        }
       }
     </style>
   </head>
   <body>
     <button class="theme-toggle" id="themeToggle" title="Toggle Theme">
       <div class="theme-toggle-icon" id="themeIcon">
-        <!-- Moon icon for dark theme -->
         <svg viewBox="0 0 24 24">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
         </svg>
@@ -506,19 +645,30 @@
 
     <div class="container">
       <div class="upload-section">
-        <h1>📤 File Transfer</h1>
-        <h1>Upload a File</h1>
+        <h1>📤 LocalShare</h1>
+        
         <div class="protocol-info" id="protocolInfo">
-          Network Protocol: HTTP over
-          <span class="protocol-badge" id="protocolBadge">TCP</span>
+          Network Protocol: HTTP over <span class="protocol-badge" id="protocolBadge">TCP</span>
         </div>
-        <form
-          id="uploadForm"
-          method="POST"
-          action="/upload"
-          enctype="multipart/form-data"
-        >
+
+        <div class="stats-container">
+          <div class="stat-card">
+            <div class="stat-value" id="totalFiles">0</div>
+            <div class="stat-label">Total Files</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="totalSize">0 MB</div>
+            <div class="stat-label">Total Size</div>
+          </div>
+        </div>
+
+        <form id="uploadForm">
+          <div class="drop-zone" id="dropZone">
+            <div class="drop-zone-icon">📁</div>
+            <div class="drop-zone-text">Click to select or drag & drop files</div>
+          </div>
           <input type="file" name="file" id="fileInput" required />
+          <div class="selected-file" id="selectedFile"></div>
           <input type="submit" value="Upload" id="uploadButton" />
         </form>
 
@@ -529,16 +679,15 @@
           <div class="progress-text" id="progressText">0%</div>
           <div class="progress-details">
             <span class="progress-size" id="progressSize">0 B / 0 B</span>
-            <span class="progress-speed" id="progressSpeed">0 B/s</span>
+            <span>
+              <span class="progress-speed" id="progressSpeed">0 B/s</span>
+              <span style="margin-left:10px;color:#94a3b8;font-size:12px;" id="progressETA">ETA: --:--</span>
+            </span>
           </div>
           <div class="network-info" id="networkInfo">
             <div class="network-details">
-              <span class="network-ip" id="networkIP"
-                >Detecting network...</span
-              >
-              <span class="network-protocol" id="networkProtocol"
-                >HTTP/TCP</span
-              >
+              <span class="network-ip" id="networkIP">Detecting network...</span>
+              <span class="network-protocol" id="networkProtocol">HTTP/TCP</span>
             </div>
           </div>
         </div>
@@ -548,298 +697,362 @@
 
       <div class="file-section">
         <h2>Uploaded Files</h2>
+        <div class="search-container">
+          <input type="text" class="search-input" id="searchInput" placeholder="🔍 Search files..." />
+        </div>
         <ul id="fileList"></ul>
       </div>
     </div>
 
     <script>
+      // Global variables
+      let allFiles = [];
+
+      // Drag and drop functionality
+      const dropZone = document.getElementById('dropZone');
+      const fileInput = document.getElementById('fileInput');
+      const selectedFileDiv = document.getElementById('selectedFile');
+
+      dropZone.addEventListener('click', () => fileInput.click());
+
+      dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('drag-over');
+      });
+
+      dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('drag-over');
+      });
+
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        
+        if (e.dataTransfer.files.length) {
+          fileInput.files = e.dataTransfer.files;
+          updateSelectedFile();
+        }
+      });
+
+      fileInput.addEventListener('change', updateSelectedFile);
+
+      function updateSelectedFile() {
+        if (fileInput.files.length > 0) {
+          const file = fileInput.files[0];
+          selectedFileDiv.textContent = `Selected: ${file.name} (${formatBytes(file.size)})`;
+          selectedFileDiv.classList.add('show');
+        } else {
+          selectedFileDiv.classList.remove('show');
+        }
+      }
+
       // Network information detection
       async function getNetworkInfo() {
         try {
-          // Get client IP and network info
-          const response = await fetch("/api/network-info");
+          const response = await fetch('/api/network-info');
           if (response.ok) {
             return await response.json();
           }
         } catch (err) {
-          console.log("Could not fetch network info from server");
+          console.log('Could not fetch network info from server');
         }
 
-        // Fallback: detect from browser
         return {
-          clientIP: await getClientIP(),
+          clientIP: window.location.hostname,
           serverIP: window.location.hostname,
-          protocol: "HTTP/TCP",
-          port: window.location.port || "1234",
+          protocol: 'HTTP/TCP',
+          serverPort: window.location.port || '1234',
         };
       }
 
-      async function getClientIP() {
+      // Load files from server
+      async function loadFiles() {
         try {
-          // Try to get IP from WebRTC (works locally)
-          return new Promise((resolve) => {
-            const pc = new RTCPeerConnection({ iceServers: [] });
-            pc.createDataChannel("");
-            pc.createOffer().then((offer) => pc.setLocalDescription(offer));
-
-            pc.onicecandidate = (ice) => {
-              if (ice && ice.candidate && ice.candidate.candidate) {
-                const candidate = ice.candidate.candidate;
-                const ipMatch = candidate.match(
-                  /([0-9]{1,3}(\.[0-9]{1,3}){3})/,
-                );
-                if (ipMatch) {
-                  pc.close();
-                  resolve(ipMatch[1]);
-                  return;
-                }
-              }
-            };
-
-            // Timeout fallback
-            setTimeout(() => {
-              pc.close();
-              resolve(window.location.hostname || "localhost");
-            }, 1000);
-          });
+          const response = await fetch('/api/files');
+          allFiles = await response.json();
+          displayFiles(allFiles);
+          updateStats();
         } catch (err) {
-          return window.location.hostname || "localhost";
+          console.error('Error loading files:', err);
+          document.getElementById('fileList').innerHTML = '<li><em>Error loading files</em></li>';
         }
       }
 
-      async function loadFiles() {
-        try {
-          const response = await fetch("/api/files");
-          const files = await response.json();
-          const fileList = document.getElementById("fileList");
-          fileList.innerHTML = "";
+      // Display files in the list
+      function displayFiles(files) {
+        const fileList = document.getElementById('fileList');
+        fileList.innerHTML = '';
 
-          if (files.length === 0) {
-            fileList.innerHTML = "<li><em>No files uploaded yet.</em></li>";
+        if (files.length === 0) {
+          fileList.innerHTML = '<li><em>No files uploaded yet.</em></li>';
+          return;
+        }
+
+        files.forEach((file) => {
+          const li = document.createElement('li');
+          li.innerHTML = `
+            <div class="file-info">
+              <div class="file-name" title="${file.name}">${file.name}</div>
+              <div class="file-meta">${formatBytes(file.size)} • ${formatDate(file.modifiedTime)}</div>
+            </div>
+            <div class="file-actions">
+              <a href="/files/${encodeURIComponent(file.name)}" download class="download-btn">⬇ Download</a>
+              <button class="btn btn-danger delete-btn" onclick="deleteFile('${file.name}')">🗑 Delete</button>
+            </div>
+          `;
+          fileList.appendChild(li);
+        });
+      }
+
+      // Update statistics
+      function updateStats() {
+        const totalFiles = allFiles.length;
+        const totalSize = allFiles.reduce((sum, file) => sum + file.size, 0);
+        
+        document.getElementById('totalFiles').textContent = totalFiles;
+        document.getElementById('totalSize').textContent = formatBytes(totalSize);
+      }
+
+      // Search functionality
+      document.getElementById('searchInput').addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase();
+        const filteredFiles = allFiles.filter(file => 
+          file.name.toLowerCase().includes(searchTerm)
+        );
+        displayFiles(filteredFiles);
+      });
+
+      // Delete file function
+      async function deleteFile(filename) {
+        if (!confirm(`Are you sure you want to delete "${filename}"?`)) {
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/files/${encodeURIComponent(filename)}`, {
+            method: 'DELETE'
+          });
+
+          if (response.ok) {
+            showStatus('File deleted successfully!', 'success');
+            loadFiles();
           } else {
-            files.forEach((name) => {
-              const li = document.createElement("li");
-              li.innerHTML = `
-                <span class="file-name" title="${name}">${name}</span>
-                <a href="/files/${encodeURIComponent(name)}" download class="download-btn">Download</a>
-              `;
-              fileList.appendChild(li);
-            });
+            const data = await response.json();
+            showStatus(data.error || 'Failed to delete file', 'error');
           }
         } catch (err) {
-          console.error("Error loading files:", err);
+          showStatus('Error deleting file', 'error');
+          console.error('Error:', err);
         }
       }
 
       // Handle form submission with progress tracking
-      document
-        .getElementById("uploadForm")
-        .addEventListener("submit", async function (e) {
-          e.preventDefault();
+      document.getElementById('uploadForm').addEventListener('submit', async function (e) {
+        e.preventDefault();
 
-          const fileInput = document.getElementById("fileInput");
-          const uploadButton = document.getElementById("uploadButton");
-          const progressContainer =
-            document.getElementById("progressContainer");
-          const progressFill = document.getElementById("progressFill");
-          const progressText = document.getElementById("progressText");
-          const progressSize = document.getElementById("progressSize");
-          const progressSpeed = document.getElementById("progressSpeed");
-          const networkIP = document.getElementById("networkIP");
-          const networkProtocol = document.getElementById("networkProtocol");
-          const uploadStatus = document.getElementById("uploadStatus");
+        const fileInput = document.getElementById('fileInput');
+        const uploadButton = document.getElementById('uploadButton');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const progressSize = document.getElementById('progressSize');
+        const progressSpeed = document.getElementById('progressSpeed');
+        const networkIP = document.getElementById('networkIP');
+        const networkProtocol = document.getElementById('networkProtocol');
+        const uploadStatus = document.getElementById('uploadStatus');
 
-          if (!fileInput.files[0]) {
-            showStatus("Please select a file to upload.", "error");
-            return;
+        if (!fileInput.files[0]) {
+          showStatus('Please select a file to upload.', 'error');
+          return;
+        }
+
+        const file = fileInput.files[0];
+        const formData = new FormData();
+        formData.append('file', file);
+
+        let startTime = Date.now();
+        let lastLoaded = 0;
+        let lastTime = startTime;
+
+        const networkInfo = await getNetworkInfo();
+
+        progressFill.style.width = '0%';
+        progressText.textContent = '0%';
+        progressSize.textContent = `0 B / ${formatBytes(file.size)}`;
+        progressSpeed.textContent = '0 B/s';
+        networkIP.textContent = `${networkInfo.clientIP} → ${networkInfo.serverIP}:${networkInfo.serverPort}`;
+        networkProtocol.textContent = networkInfo.protocol;
+        progressContainer.style.display = 'block';
+        uploadStatus.style.display = 'none';
+        uploadButton.disabled = true;
+        uploadButton.value = 'Uploading...';
+
+        const xhr = new XMLHttpRequest();
+
+        xhr.upload.addEventListener('progress', function (e) {
+          if (e.lengthComputable) {
+            const percentComplete = (e.loaded / e.total) * 100;
+            const currentTime = Date.now();
+
+            progressFill.style.width = percentComplete + '%';
+            progressText.textContent = Math.round(percentComplete) + '%';
+            progressSize.textContent = `${formatBytes(e.loaded)} / ${formatBytes(e.total)}`;
+
+            const timeDiff = currentTime - lastTime;
+            if (timeDiff > 100) {
+              const bytesDiff = e.loaded - lastLoaded;
+              const speed = (bytesDiff / timeDiff) * 1000;
+              progressSpeed.textContent = formatBytes(speed) + '/s';
+
+              // Calculate ETA (seconds remaining)
+              const bytesRemaining = e.total - e.loaded;
+              const etaSeconds = speed > 0 ? Math.max(0, Math.round(bytesRemaining / speed)) : null;
+              const etaEl = document.getElementById('progressETA');
+              if (etaSeconds === null) {
+                etaEl.textContent = 'ETA: --:--';
+              } else if (etaSeconds <= 0) {
+                etaEl.textContent = 'ETA: 0s';
+              } else if (etaSeconds < 60) {
+                etaEl.textContent = `ETA: ${etaSeconds}s`;
+              } else {
+                const mins = Math.floor(etaSeconds / 60);
+                const secs = etaSeconds % 60;
+                etaEl.textContent = `ETA: ${mins}m ${secs}s`;
+              }
+
+              lastLoaded = e.loaded;
+              lastTime = currentTime;
+            }
+          }
+        });
+
+        xhr.addEventListener('load', function () {
+          if (xhr.status === 200) {
+            progressFill.style.width = '100%';
+            progressText.textContent = '100%';
+            progressSize.textContent = `${formatBytes(file.size)} / ${formatBytes(file.size)}`;
+            progressSpeed.textContent = 'Complete';
+            const etaEl = document.getElementById('progressETA');
+            etaEl.textContent = 'ETA: 0s';
+            showStatus('File uploaded successfully!', 'success');
+            fileInput.value = '';
+            selectedFileDiv.classList.remove('show');
+            loadFiles();
+
+            setTimeout(() => {
+              progressContainer.style.display = 'none';
+            }, 3000);
+          } else {
+            showStatus('Upload failed. Please try again.', 'error');
+            progressContainer.style.display = 'none';
+            const etaEl = document.getElementById('progressETA');
+            if (etaEl) etaEl.textContent = 'ETA: --:--';
           }
 
-          const file = fileInput.files[0];
-          const formData = new FormData();
-          formData.append("file", file);
-
-          // Variables for speed calculation
-          let startTime = Date.now();
-          let lastLoaded = 0;
-          let lastTime = startTime;
-
-          // Get network information
-          const networkInfo = await getNetworkInfo();
-
-          // Reset and show progress elements
-          progressFill.style.width = "0%";
-          progressText.textContent = "0%";
-          progressSize.textContent = `0 B / ${formatBytes(file.size)}`;
-          progressSpeed.textContent = "0 B/s";
-          networkIP.textContent = `${networkInfo.clientIP} → ${networkInfo.serverIP}:${networkInfo.port}`;
-          networkProtocol.textContent = networkInfo.protocol;
-          progressContainer.style.display = "block";
-          uploadStatus.style.display = "none";
-          uploadButton.disabled = true;
-          uploadButton.value = "Uploading...";
-
-          // Create XMLHttpRequest for progress tracking
-          const xhr = new XMLHttpRequest();
-
-          // Track upload progress
-          xhr.upload.addEventListener("progress", function (e) {
-            if (e.lengthComputable) {
-              const percentComplete = (e.loaded / e.total) * 100;
-              const currentTime = Date.now();
-
-              // Update progress bar and percentage
-              progressFill.style.width = percentComplete + "%";
-              progressText.textContent = Math.round(percentComplete) + "%";
-
-              // Update size information
-              progressSize.textContent = `${formatBytes(e.loaded)} / ${formatBytes(e.total)}`;
-
-              // Calculate and update speed
-              const timeDiff = currentTime - lastTime;
-              if (timeDiff > 100) {
-                // Update speed every 100ms to smooth out fluctuations
-                const bytesDiff = e.loaded - lastLoaded;
-                const speed = (bytesDiff / timeDiff) * 1000; // bytes per second
-                progressSpeed.textContent = formatBytes(speed) + "/s";
-
-                lastLoaded = e.loaded;
-                lastTime = currentTime;
-              }
-            }
-          });
-
-          // Handle successful upload
-          xhr.addEventListener("load", function () {
-            if (xhr.status === 200 || xhr.status === 303) {
-              progressFill.style.width = "100%";
-              progressText.textContent = "100%";
-              progressSize.textContent = `${formatBytes(file.size)} / ${formatBytes(file.size)}`;
-              progressSpeed.textContent = "Complete";
-              showStatus("File uploaded successfully!", "success");
-              fileInput.value = ""; // Clear file input
-              loadFiles(); // Refresh file list
-
-              // Hide progress bar after a delay
-              setTimeout(() => {
-                progressContainer.style.display = "none";
-              }, 3000);
-            } else {
-              showStatus("Upload failed. Please try again.", "error");
-              progressContainer.style.display = "none";
-            }
-
-            // Reset button
-            uploadButton.disabled = false;
-            uploadButton.value = "Upload";
-          });
-
-          // Handle upload error
-          xhr.addEventListener("error", function () {
-            showStatus(
-              "Upload failed. Please check your connection and try again.",
-              "error",
-            );
-            progressContainer.style.display = "none";
-            uploadButton.disabled = false;
-            uploadButton.value = "Upload";
-          });
-
-          // Send the request
-          xhr.open("POST", "/upload");
-          xhr.send(formData);
+          uploadButton.disabled = false;
+          uploadButton.value = 'Upload';
         });
+
+        xhr.addEventListener('error', function () {
+          showStatus('Upload failed. Please check your connection and try again.', 'error');
+          progressContainer.style.display = 'none';
+          uploadButton.disabled = false;
+          uploadButton.value = 'Upload';
+        });
+
+        xhr.open('POST', '/upload');
+        xhr.send(formData);
+      });
 
       // Format bytes to human readable format
       function formatBytes(bytes, decimals = 2) {
-        if (bytes === 0) return "0 B";
+        if (bytes === 0) return '0 B';
 
         const k = 1024;
         const dm = decimals < 0 ? 0 : decimals;
-        const sizes = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
 
         const i = Math.floor(Math.log(bytes) / Math.log(k));
 
-        return (
-          parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i]
-        );
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
       }
 
+      // Format date to readable format
+      function formatDate(dateString) {
+        const date = new Date(dateString);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins} min ago`;
+        if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+        if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+        
+        return date.toLocaleDateString();
+      }
+
+      // Show status message
       function showStatus(message, type) {
-        const uploadStatus = document.getElementById("uploadStatus");
+        const uploadStatus = document.getElementById('uploadStatus');
         uploadStatus.textContent = message;
         uploadStatus.className = `upload-status ${type}`;
-        uploadStatus.style.display = "block";
+        uploadStatus.style.display = 'block';
 
-        // Hide status message after 5 seconds
         setTimeout(() => {
-          uploadStatus.style.display = "none";
+          uploadStatus.style.display = 'none';
         }, 5000);
       }
 
-      // Load on page load and refresh every 10 seconds
-      loadFiles();
-      setInterval(loadFiles, 10000);
-
-      // Load network info on page load
-      updateProtocolInfo();
-
-      async function updateProtocolInfo() {
-        try {
-          const networkInfo = await getNetworkInfo();
-          const protocolBadge = document.getElementById("protocolBadge");
-          protocolBadge.textContent = networkInfo.connectionType || "TCP";
-        } catch (err) {
-          console.log("Could not update protocol info");
-        }
-      }
-
       // Theme toggle functionality
-      const themeToggle = document.getElementById("themeToggle");
-      const themeIcon = document.getElementById("themeIcon");
+      const themeToggle = document.getElementById('themeToggle');
+      const body = document.body;
 
-      // SVG icons
-      const moonIcon = `
-        <svg viewBox="0 0 24 24">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-        </svg>
-      `;
-
-      const sunIcon = `
-        <svg viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="4"></circle>
-          <path d="M12 2v2"></path>
-          <path d="M12 20v2"></path>
-          <path d="m4.93 4.93 1.41 1.41"></path>
-          <path d="m17.66 17.66 1.41 1.41"></path>
-          <path d="M2 12h2"></path>
-          <path d="M20 12h2"></path>
-          <path d="m6.34 17.66-1.41 1.41"></path>
-          <path d="m19.07 4.93-1.41 1.41"></path>
-        </svg>
-      `;
-
-      // Set dark as default theme
-      const savedTheme = localStorage.getItem("theme") || "dark";
-      applyTheme(savedTheme);
-
-      themeToggle.addEventListener("click", function () {
-        const currentTheme = document.body.classList.contains("light-theme")
-          ? "light"
-          : "dark";
-        const newTheme = currentTheme === "dark" ? "light" : "dark";
-        applyTheme(newTheme);
-        localStorage.setItem("theme", newTheme);
+      themeToggle.addEventListener('click', () => {
+        body.classList.toggle('light-theme');
+        const isLight = body.classList.contains('light-theme');
+        localStorage.setItem('theme', isLight ? 'light' : 'dark');
+        updateThemeIcon(isLight);
       });
 
-      function applyTheme(theme) {
-        if (theme === "light") {
-          document.body.classList.add("light-theme");
-          themeIcon.innerHTML = sunIcon;
+      function updateThemeIcon(isLight) {
+        const icon = document.getElementById('themeIcon');
+        if (isLight) {
+          icon.innerHTML = `
+            <svg viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+          `;
         } else {
-          document.body.classList.remove("light-theme");
-          themeIcon.innerHTML = moonIcon;
+          icon.innerHTML = `
+            <svg viewBox="0 0 24 24">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+          `;
         }
       }
+
+      // Load saved theme
+      const savedTheme = localStorage.getItem('theme');
+      if (savedTheme === 'light') {
+        body.classList.add('light-theme');
+        updateThemeIcon(true);
+      } else {
+        updateThemeIcon(false);
+      }
+
+      // Initialize the app
+      loadFiles();
     </script>
   </body>
 </html>
