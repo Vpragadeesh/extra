@@ -249,10 +249,9 @@ draw_full_interface() {
         fi
     done
     echo -e "\e[1;35m╠═══════════════════════ CONTROLS ══════════════════════╣\e[0m"
-    echo -e "  [\e[1;33ml\e[0m] like    [\e[1;31md\e[0m] dislike    [\e[1mn\e[0m] next"
-    echo -e "  [\e[1mb\e[0m] skip −5s    [\e[1mf\e[0m] skip +5s    [\e[1mp/SPACE\e[0m] play/pause"
-    echo -e "  [\e[1;36m/\e[0m] seek to time"
-    echo -e "  [\e[1ms\e[0m] choose song    [\e[1mc\e[0m] change folder    [\e[1mq\e[0m] quit"
+    echo -e "  [\e[1;33mf\e[0m] like    [\e[1;31md\e[0m] dislike    [\e[1mj\e[0m] next    [\e[1;k\e[0m] previous"
+    echo -e "  [\e[1mh\e[0m] skip −5s    [\e[1ml\e[0m] skip +5s    [\e[1mp/SPACE\e[0m] play/pause"
+    echo -e "  [\e[1ms\e[0m] choose song    [\e[1mc\e[0m] change folder    [\e[1;q\e[0m] quit"
     echo -e "\e[1;35m╠═══════════════════ NOW PLAYING ═══════════════════╣\e[0m"
     echo -e "  $FOLDER/\e[1;33m${songs[$index]##*/}\e[0m"
     echo -e "  \e[1;34mSize:\e[0m $size   \e[1;34mSample Rate:\e[0m $sample_rate   \e[1;34mBitrate:\e[0m $bit_rate   \e[1;34mBit Depth:\e[0m $bit_depth"
@@ -342,29 +341,29 @@ while true; do
     if read -rsN1 -t 0.5 key;
     then
         case "$key" in
-            l|L)
+            f|F|+)
                 echo "$FOLDER/${songs[$index]##*/}" >> "$LIKES_FILE"
                 # Show temporary feedback above progress bar
                 echo -ne "\033[s"
-                local feedback_line=$((3 + 1 + 1 + ${#songs[@]} + 1 + 5))
+                feedback_line=$((3 + 1 + 1 + ${#songs[@]} + 1 + 5))
                 echo -ne "\033[${feedback_line};1H\033[K\e[1;32mLiked!\\e[0m"
                 echo -ne "\033[u"
                 sleep 1
                 # Clear feedback
                 echo -ne "\033[s\033[${feedback_line};1H\033[K\033[u"
                 ;;
-            d|D)
+            d|D|-)
                 echo "$FOLDER/${songs[$index]##*/}" >> "$DISLIKES_FILE"
                 # Show temporary feedback above progress bar
                 echo -ne "\033[s"
-                local feedback_line=$((3 + 1 + 1 + ${#songs[@]} + 1 + 5))
+                feedback_line=$((3 + 1 + 1 + ${#songs[@]} + 1 + 5))
                 echo -ne "\033[${feedback_line};1H\033[K\e[1;31mDisliked!\\e[0m"
                 echo -ne "\033[u"
                 sleep 1
                 # Clear feedback
                 echo -ne "\033[s\033[${feedback_line};1H\033[K\033[u"
                 ;;
-            n|N)
+            j|J)
                 # Stop current playback and play next song
                 if [[ -n "$mpv_pid" ]] && kill -0 "$mpv_pid" 2>/dev/null;
                 then
@@ -372,6 +371,16 @@ while true; do
                     wait "$mpv_pid" 2>/dev/null
                 fi
                 ((index=(index+1)%${#songs[@]}))
+                play_song
+                ;;
+            k|K)
+                # Stop current playback and play previous song
+                if [[ -n "$mpv_pid" ]] && kill -0 "$mpv_pid" 2>/dev/null;
+                then
+                    kill "$mpv_pid" 2>/dev/null
+                    wait "$mpv_pid" 2>/dev/null
+                fi
+                ((index=(index-1+${#songs[@]})%${#songs[@]}))
                 play_song
                 ;;
             s|S)
@@ -401,17 +410,17 @@ while true; do
                 # Toggle play/pause
                 send_mpv_command '{ "command": ["cycle", "pause"] }' >/dev/null 2>&1
                 ;;
-            b|B)
+            h|H)
                 # Skip backward 5 seconds
                 send_mpv_command '{ "command": ["seek", -5, "relative"] }' >/dev/null 2>&1
                 ;;
-            f|F)
+            l|L)
                 # Skip forward 5 seconds
                 send_mpv_command '{ "command": ["seek", 5, "relative"] }' >/dev/null 2>&1
                 ;;
             /)
                 # Use the feedback line for prompting
-                local prompt_line=$((3 + 1 + 1 + ${#songs[@]} + 1 + 5))
+                prompt_line=$((3 + 1 + 1 + ${#songs[@]} + 1 + 5))
                 echo -ne "\033[s" # save cursor
                 echo -ne "\033[${prompt_line};1H\033[K" # move to line and clear it
                 echo -ne "\033[?25h" # show cursor
