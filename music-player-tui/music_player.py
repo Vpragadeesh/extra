@@ -98,8 +98,9 @@ def get_songs():
     folder_path = MUSIC_ROOT / current_folder
     found_songs = []
     for ext in SUPPORTED_EXTENSIONS:
-        found_songs.extend(folder_path.glob(f"*{ext}"))
-        found_songs.extend(folder_path.glob(f"*{ext.upper()}"))
+        # Use rglob for recursive search through all subdirectories
+        found_songs.extend(folder_path.rglob(f"*{ext}"))
+        found_songs.extend(folder_path.rglob(f"*{ext.upper()}"))
 
     songs = sorted(list(set(found_songs))) # Use set to remove duplicates
 
