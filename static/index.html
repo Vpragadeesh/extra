@@ -665,9 +665,9 @@
         <form id="uploadForm">
           <div class="drop-zone" id="dropZone">
             <div class="drop-zone-icon">📁</div>
-            <div class="drop-zone-text">Click to select or drag & drop files</div>
+            <div class="drop-zone-text">Click to select or drag & drop multiple files</div>
           </div>
-          <input type="file" name="file" id="fileInput" required />
+          <input type="file" name="files" id="fileInput" multiple required />
           <div class="selected-file" id="selectedFile"></div>
           <input type="submit" value="Upload" id="uploadButton" />
         </form>
@@ -738,8 +738,14 @@
 
       function updateSelectedFile() {
         if (fileInput.files.length > 0) {
-          const file = fileInput.files[0];
-          selectedFileDiv.textContent = `Selected: ${file.name} (${formatBytes(file.size)})`;
+          const files = Array.from(fileInput.files);
+          const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+          
+          if (files.length === 1) {
+            selectedFileDiv.textContent = `Selected: ${files[0].name} (${formatBytes(files[0].size)})`;
+          } else {
+            selectedFileDiv.innerHTML = `<strong>${files.length} files selected</strong> (Total: ${formatBytes(totalSize)})<br><small>${files.map(f => f.name).join(', ')}</small>`;
+          }
           selectedFileDiv.classList.add('show');
         } else {
           selectedFileDiv.classList.remove('show');
@@ -861,14 +867,15 @@
         const networkProtocol = document.getElementById('networkProtocol');
         const uploadStatus = document.getElementById('uploadStatus');
 
-        if (!fileInput.files[0]) {
-          showStatus('Please select a file to upload.', 'error');
+        if (!fileInput.files.length) {
+          showStatus('Please select file(s) to upload.', 'error');
           return;
         }
 
-        const file = fileInput.files[0];
+        const files = Array.from(fileInput.files);
+        const totalSize = files.reduce((sum, f) => sum + f.size, 0);
         const formData = new FormData();
-        formData.append('file', file);
+        files.forEach(file => formData.append('files', file));
 
         let startTime = Date.now();
         let lastLoaded = 0;
@@ -878,7 +885,7 @@
 
         progressFill.style.width = '0%';
         progressText.textContent = '0%';
-        progressSize.textContent = `0 B / ${formatBytes(file.size)}`;
+        progressSize.textContent = `0 B / ${formatBytes(totalSize)}`;
         progressSpeed.textContent = '0 B/s';
         networkIP.textContent = `${networkInfo.clientIP} → ${networkInfo.serverIP}:${networkInfo.serverPort}`;
         networkProtocol.textContent = networkInfo.protocol;
@@ -930,11 +937,14 @@
           if (xhr.status === 200) {
             progressFill.style.width = '100%';
             progressText.textContent = '100%';
-            progressSize.textContent = `${formatBytes(file.size)} / ${formatBytes(file.size)}`;
+            progressSize.textContent = `${formatBytes(totalSize)} / ${formatBytes(totalSize)}`;
             progressSpeed.textContent = 'Complete';
             const etaEl = document.getElementById('progressETA');
             etaEl.textContent = 'ETA: 0s';
-            showStatus('File uploaded successfully!', 'success');
+            const successMsg = files.length === 1 
+              ? 'File uploaded successfully!' 
+              : `${files.length} files uploaded successfully!`;
+            showStatus(successMsg, 'success');
             fileInput.value = '';
             selectedFileDiv.classList.remove('show');
             loadFiles();
