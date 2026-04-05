@@ -1,0 +1,6 @@
+#!/bin/bash
+# Torrent downloader wrapper script
+# Usage: ./torrent "magnet:?xt=urn:btih:..." [options]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"$SCRIPT_DIR/fastdown" "$@"
