@@ -1,0 +1,9 @@
+cmd/fastdown/main.go:11:2: missing go.sum entry for module providing package github.com/anacrolix/torrent (imported by torrent-downloader/cmd/fastdown); to add:
+	go get torrent-downloader/cmd/fastdown
+cmd/fastdown/main.go:12:2: missing go.sum entry for module providing package github.com/schollz/progressbar/v3 (imported by torrent-downloader/cmd/fastdown); to add:
+	go get torrent-downloader/cmd/fastdown
+cmd/fastdown/main.go:13:2: missing go.sum entry for module providing package github.com/urfave/cli/v2 (imported by torrent-downloader/cmd/fastdown); to add:
+	go get torrent-downloader/cmd/fastdown
+cmd/fastdown/main.go:14:2: missing go.sum entry for module providing package gopkg.in/yaml.v2 (imported by torrent-downloader/cmd/fastdown); to add:
+	go get torrent-downloader/cmd/fastdown
+pkg/downloader/manager.go:14:2: package torrent-downloader/internal/netlimit is not in std (/usr/lib/go/src/torrent-downloader/internal/netlimit)
