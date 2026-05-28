@@ -9,13 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+	pp "github.com/anacrolix/torrent/peer_protocol"
 	"github.com/schollz/progressbar/v3"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v2"
 )
 
@@ -35,8 +36,8 @@ func DefaultConfig() *Config {
 	return &Config{
 		OutputDir:   "/home/pragadeesh/Videos/",
 		MaxSpeed:    0, // unlimited
-		Connections: 100,
-		ChunkSize:   524288, // 512KB
+		Connections: 300,
+		ChunkSize:   16 * 1024,
 		Timeout:     30,
 		SaveResume:  true,
 		ResumeFile:  ".resume",
@@ -145,6 +146,23 @@ func NewManager(client *torrent.Client, cfg *Config) *Manager {
 	}
 }
 
+func NewTorrentClientConfig(cfg *Config) *torrent.ClientConfig {
+	clientConfig := torrent.NewDefaultClientConfig()
+	clientConfig.DataDir = cfg.OutputDir
+	clientConfig.EstablishedConnsPerTorrent = cfg.Connections
+	clientConfig.HalfOpenConnsPerTorrent = max(cfg.Connections/2, 50)
+	clientConfig.TotalHalfOpenConns = max(cfg.Connections, 100)
+	clientConfig.TorrentPeersHighWater = max(cfg.Connections*8, 1000)
+	clientConfig.TorrentPeersLowWater = max(cfg.Connections, 100)
+	clientConfig.MaxUnverifiedBytes = 512 << 20
+	clientConfig.PieceHashersPerTorrent = 4
+	clientConfig.DialRateLimiter = rate.NewLimiter(rate.Limit(max(cfg.Connections*2, 200)), max(cfg.Connections*2, 200))
+	if cfg.MaxSpeed > 0 {
+		clientConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(cfg.MaxSpeed), max(int(cfg.MaxSpeed), 64<<10))
+	}
+	return clientConfig
+}
+
 // Download starts a torrent download
 func (m *Manager) Download(ctx context.Context, resource string) error {
 	var t *torrent.Torrent
@@ -154,6 +172,9 @@ func (m *Manager) Download(ctx context.Context, resource string) error {
 		spec, err := torrent.TorrentSpecFromMagnetUri(resource)
 		if err != nil {
 			return fmt.Errorf("invalid magnet URI: %w", err)
+		}
+		if m.config.ChunkSize > 0 {
+			spec.ChunkSize = pp.Integer(m.config.ChunkSize)
 		}
 		var err2 error
 		t, _, err2 = m.client.AddTorrentSpec(spec)
@@ -170,15 +191,11 @@ func (m *Manager) Download(ctx context.Context, resource string) error {
 		if err != nil {
 			return fmt.Errorf("failed to parse torrent file: %w", err)
 		}
-		// Create a minimal spec from the metadata
-		spec := &torrent.TorrentSpec{
-			Trackers: mi.AnnounceList,
+		torrentHandle, err := m.client.AddTorrent(mi)
+		if err != nil {
+			return fmt.Errorf("failed to add torrent: %w", err)
 		}
-		var err2 error
-		t, _, err2 = m.client.AddTorrentSpec(spec)
-		if err2 != nil {
-			return fmt.Errorf("failed to add torrent: %w", err2)
-		}
+		t = torrentHandle
 	}
 
 	// Create output directory
@@ -229,53 +246,27 @@ func (m *Manager) Download(ctx context.Context, resource string) error {
 		}),
 	)
 
-	// Download all files concurrently with a wait group
-	var wg sync.WaitGroup
-	errChan := make(chan error, len(t.Files()))
+	t.DownloadAll()
 
-	for _, file := range t.Files() {
-		wg.Add(1)
-		go func(f *torrent.File) {
-			defer wg.Done()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 
-			outputPath := filepath.Join(m.config.OutputDir, f.Path())
-			if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-				errChan <- fmt.Errorf("failed to create directory: %w", err)
-				return
-			}
-
-			out, err := os.Create(outputPath)
-			if err != nil {
-				errChan <- fmt.Errorf("failed to create file: %w", err)
-				return
-			}
-			defer out.Close()
-
-			reader := f.NewReader()
-			defer reader.Close()
-
-			_, err = io.CopyN(io.MultiWriter(out, bar), reader, f.Length())
-			if err != nil && err != io.EOF {
-				errChan <- fmt.Errorf("download failed for %s: %w", f.Path(), err)
-				return
-			}
-		}(file)
-	}
-
-	wg.Wait()
-	close(errChan)
-
-	// Check for errors
-	for err := range errChan {
-		if err != nil {
+	for {
+		select {
+		case <-ctx.Done():
 			bar.Close()
-			return err
+			return ctx.Err()
+		case <-t.Complete().On():
+			_ = bar.Set64(info.TotalLength())
+			bar.Finish()
+			fmt.Printf("\n[done] Download complete: %s\n", info.Name)
+			return nil
+		case <-ticker.C:
+			stats := t.Stats()
+			bar.Describe(fmt.Sprintf("[cyan][downloading][reset] peers:%d/%d", stats.ActivePeers, stats.TotalPeers))
+			_ = bar.Set64(t.BytesCompleted())
 		}
 	}
-
-	bar.Finish()
-	fmt.Printf("\n[✓] Download complete: %s\n", info.Name)
-	return nil
 }
 
 func main() {
@@ -294,7 +285,7 @@ func main() {
 				Name:    "connections",
 				Aliases: []string{"C"},
 				Usage:   "Max concurrent connections",
-				Value:   100,
+				Value:   DefaultConfig().Connections,
 			},
 			&cli.StringFlag{
 				Name:    "output",
@@ -332,12 +323,12 @@ func main() {
 			if cfg.OutputDir == "" {
 				cfg.OutputDir = "."
 			}
-			if maxConnections > 0 {
+			if c.IsSet("connections") && maxConnections > 0 {
 				cfg.Connections = maxConnections
 			}
 
 			// Create torrent client
-			client, err := torrent.NewClient(nil)
+			client, err := torrent.NewClient(NewTorrentClientConfig(cfg))
 			if err != nil {
 				return fmt.Errorf("failed to create torrent client: %w", err)
 			}

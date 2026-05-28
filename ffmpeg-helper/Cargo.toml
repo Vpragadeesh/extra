@@ -1,0 +1,13 @@
+[package]
+name = "ffmpeg-helper"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+indicatif = "0.17"
+# Terminal UI
+crossterm = "0.26"
+ratatui = "0.20"

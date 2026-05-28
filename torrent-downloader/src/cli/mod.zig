@@ -8,14 +8,65 @@ pub const Args = struct {
     max_speed: i64 = 0,
 
     pub fn deinit(self: *Args, allocator: std.mem.Allocator) void {
-        _ = self;
-        _ = allocator;
+        if (self.torrent_path.len != 0) allocator.free(self.torrent_path);
+        if (self.output_dir.len != 0) allocator.free(self.output_dir);
+        if (!std.mem.eql(u8, self.config_path, "configs/config.yaml")) allocator.free(self.config_path);
     }
 };
 
-pub fn parseArgs(_: std.mem.Allocator) !Args {
-    const args = Args{};
-    return args;
+pub fn parseArgs(allocator: std.mem.Allocator, process_args: std.process.Args) !Args {
+    var it = try std.process.Args.Iterator.initAllocator(process_args, allocator);
+    defer it.deinit();
+
+    // skip argv[0]
+    _ = it.next();
+
+    var out = Args{};
+    var seen_positional = false;
+
+    while (it.next()) |arg_z| {
+        const arg = std.mem.sliceTo(arg_z, 0);
+        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            try printHelp();
+            return error.InvalidArguments;
+        }
+
+        if (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output")) {
+            const val_z = it.next() orelse return error.InvalidArguments;
+            const val = std.mem.sliceTo(val_z, 0);
+            out.output_dir = try allocator.dupe(u8, val);
+            continue;
+        }
+
+        if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--config")) {
+            const val_z = it.next() orelse return error.InvalidArguments;
+            const val = std.mem.sliceTo(val_z, 0);
+            if (!std.mem.eql(u8, out.config_path, "configs/config.yaml")) allocator.free(out.config_path);
+            out.config_path = try allocator.dupe(u8, val);
+            continue;
+        }
+
+        if (std.mem.eql(u8, arg, "-C") or std.mem.eql(u8, arg, "--connections")) {
+            const val_z = it.next() orelse return error.InvalidArguments;
+            const val = std.mem.sliceTo(val_z, 0);
+            out.max_connections = std.fmt.parseInt(u32, val, 10) catch return error.InvalidArguments;
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, arg, "-")) {
+            // unknown flag
+            return error.InvalidArguments;
+        }
+
+        if (seen_positional) {
+            // only 1 positional supported
+            return error.InvalidArguments;
+        }
+        seen_positional = true;
+        out.torrent_path = try allocator.dupe(u8, arg);
+    }
+
+    return out;
 }
 
 pub fn printHelp() !void {

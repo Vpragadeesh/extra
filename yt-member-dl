@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+
+PROFILE="firefox"
+OUTPUT_DIR="$HOME/Videos/youtube-members"
+
+mkdir -p "$OUTPUT_DIR" "$OUTPUT_DIR/audio"
+
+print_usage() {
+  echo "Usage:"
+  echo "  yt-member-dl VIDEO_URL"
+  echo "  yt-member-dl -a urls.txt"
+}
+
+if [ "$#" -eq 0 ]; then
+  print_usage
+  exit 1
+fi
+
+# Handle interactive single-URL download
+download_with_format_selection() {
+  local url="$1"
+
+  # Detect playlist
+  is_pl=0
+  pl_info=$(yt-dlp -J --flat-playlist "$url" 2>/dev/null || true)
+  if [ -n "$pl_info" ]; then
+    # check if JSON contains entries
+    if echo "$pl_info" | python3 -c "import sys,json
+try:
+ d=json.load(sys.stdin)
+ print('entries' in d and len(d.get('entries',[])))
+except:
+ print(0)" | grep -qve '^0$'; then
+      is_pl=1
+      pl_count=$(echo "$pl_info" | python3 -c "import sys,json
+d=json.load(sys.stdin)
+print(len(d.get('entries',[])))")
+    fi
+  fi
+
+  if [ "$is_pl" -eq 1 ]; then
+    echo "Detected playlist with $pl_count items. Download entire playlist? (Y/n)"
+    read -r PL_ANS
+    PL_ANS=${PL_ANS:-Y}
+    if [[ ! "$PL_ANS" =~ ^[Yy] ]]; then
+      echo "Aborting. If you want to download a single video from the playlist, pass its direct URL instead."
+      return 0
+    fi
+  fi
+
+  # Ask audio or video
+  echo ""
+  echo "What would you like to download?"
+  echo "  1) Video + Audio (1440p if available)"
+  echo "  2) Video + Audio (1080p if available)"
+  echo "  3) Video + Audio (720p if available)"
+  echo "  4) Video + Audio (480p if available)"
+  echo "  5) Video + Audio (360p if available)"
+  echo "  6) Video + Audio (240p if available)"
+  echo "  7) Video + Audio (144p if available)"
+  echo "  8) Audio only (webm/best)"
+  echo "  9) Video + Audio (AV1 best quality, .webm)"
+  echo "  10) Custom format string"
+  read -p "Select (1-10, default 1): " QUALITY_CHOICE
+  QUALITY_CHOICE=${QUALITY_CHOICE:-1}
+  OUTPUT_TEMPLATE="$OUTPUT_DIR/%(channel)s/%(playlist_title|Single Videos)s/%(title)s [%(id)s].%(ext)s"
+  ARCHIVE_FILE="$OUTPUT_DIR/downloaded.txt"
+  EMBED_THUMB=1
+  EXTRACT_AUDIO=0
+  AUDIO_FORMAT="mp3"
+  AUDIO_QUALITY=""
+
+  case "$QUALITY_CHOICE" in
+    2)
+      FORMAT="400+251/bestvideo+bestaudio/best"
+      MERGE_FMT=""
+      QUALITY_DESC="1080p video + audio"
+      ;;
+    3)
+      FORMAT="bestvideo[height<=720]+bestaudio/best[height<=720]"
+      MERGE_FMT=""
+      QUALITY_DESC="720p video + audio"
+      ;;
+    4)
+      FORMAT="bestvideo[height<=480]+bestaudio/best[height<=480]"
+      MERGE_FMT=""
+      QUALITY_DESC="480p video + audio"
+      ;;
+    5)
+      FORMAT="bestvideo[height<=360]+bestaudio/best[height<=360]"
+      MERGE_FMT=""
+      QUALITY_DESC="360p video + audio"
+      ;;
+    6)
+      FORMAT="bestvideo[height<=240]+bestaudio/best[height<=240]"
+      MERGE_FMT=""
+      QUALITY_DESC="240p video + audio"
+      ;;
+    7)
+      FORMAT="bestvideo[height<=144]+bestaudio/best[height<=144]"
+      MERGE_FMT=""
+      QUALITY_DESC="144p video + audio"
+      ;;
+    8)
+      FORMAT="bestaudio"
+      MERGE_FMT=""
+      QUALITY_DESC="audio only (webm/best)"
+      OUTPUT_TEMPLATE="$OUTPUT_DIR/audio/%(channel)s/%(playlist_title|Single Videos)s/%(title)s [%(id)s].%(ext)s"
+      ARCHIVE_FILE="$OUTPUT_DIR/audio/downloaded.txt"
+      EXTRACT_AUDIO=0
+      AUDIO_QUALITY=""
+      ;;
+    9)
+      FORMAT="bestvideo[vcodec^=av01]+bestaudio[ext=webm]/bestvideo[ext=webm]+bestaudio[ext=webm]/best"
+      MERGE_FMT="webm"
+      QUALITY_DESC="AV1 video + audio (.webm)"
+      ;;
+    10)
+      read -p "Enter format string (e.g. 308+251 or bestaudio): " FORMAT
+      read -p "Enter merge format (mkv/mp4/webm, default empty): " MERGE_FMT
+      MERGE_FMT=${MERGE_FMT:-}
+      QUALITY_DESC="custom ($FORMAT)"
+      ;;
+    *)
+      FORMAT="308+251/400+251/bestvideo+bestaudio/best"
+      MERGE_FMT=""
+      QUALITY_DESC="1440p video + audio"
+      ;;
+  esac
+
+  echo ""
+  echo "Downloading: $QUALITY_DESC"
+  echo "URL: $url"
+  echo ""
+
+  # Download with chosen format
+  DL_ARGS=(
+    --cookies-from-browser "firefox"
+    --remote-components ejs:github
+    -f "$FORMAT"
+    --embed-metadata
+    --embed-thumbnail
+    --write-subs
+    --write-auto-subs
+    --sub-langs "en.*"
+    --convert-subs srt
+    --download-archive "$ARCHIVE_FILE"
+    -o "$OUTPUT_TEMPLATE"
+  )
+  if [ "$EMBED_THUMB" -eq 0 ]; then
+    for i in "${!DL_ARGS[@]}"; do
+      if [ "${DL_ARGS[$i]}" = "--embed-thumbnail" ]; then
+        unset 'DL_ARGS[i]'
+      fi
+    done
+  fi
+  if [ "$EXTRACT_AUDIO" -eq 1 ]; then
+    DL_ARGS+=(--extract-audio --audio-format "$AUDIO_FORMAT" --audio-quality "$AUDIO_QUALITY")
+  fi
+  if [ -n "$MERGE_FMT" ]; then
+    DL_ARGS+=(--merge-output-format "$MERGE_FMT")
+  fi
+  yt-dlp "${DL_ARGS[@]}" "$url"
+}
+
+# Main logic
+if [ "$1" = "-a" ]; then
+  # Batch mode: non-interactive, use defaults
+  shift
+  if [ "$#" -eq 0 ]; then
+    echo "Missing filename after -a"
+    exit 1
+  fi
+  FORMAT="308+251/400+251/bestvideo+bestaudio/best"
+  MERGE_FMT=""
+  COMMON_ARGS=(
+    --cookies-from-browser "firefox"
+    --remote-components ejs:github
+    -f "$FORMAT"
+    --embed-metadata
+    --embed-thumbnail
+    --write-subs
+    --write-auto-subs
+    --sub-langs "en.*"
+    --convert-subs srt
+    --download-archive "$OUTPUT_DIR/downloaded.txt"
+    -o "$OUTPUT_DIR/%(channel)s/%(playlist_title|Single Videos)s/%(title)s [%(id)s].%(ext)s"
+  )
+  yt-dlp "${COMMON_ARGS[@]}" -a "$1"
+elif [ -t 0 ] && [ -t 1 ]; then
+  # Interactive single URL
+  download_with_format_selection "$1"
+else
+  # Non-interactive single URL (use defaults)
+  FORMAT="308+251/400+251/bestvideo+bestaudio/best"
+  MERGE_FMT=""
+  COMMON_ARGS=(
+    --cookies-from-browser "firefox"
+    --remote-components ejs:github
+    -f "$FORMAT"
+    --embed-metadata
+    --embed-thumbnail
+    --write-subs
+    --write-auto-subs
+    --sub-langs "en.*"
+    --convert-subs srt
+    --download-archive "$OUTPUT_DIR/downloaded.txt"
+    -o "$OUTPUT_DIR/%(channel)s/%(playlist_title|Single Videos)s/%(title)s [%(id)s].%(ext)s"
+  )
+  yt-dlp "${COMMON_ARGS[@]}" "$@"
+fi

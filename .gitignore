@@ -7,3 +7,12 @@
 
 ./uploads/*
 ./uploads/
+
+# torrent-downloader
+torrent-downloader/.zig-cache/
+torrent-downloader/zig-out/
+torrent-downloader/.torrent.db
+torrent-downloader/.torrent.db-*
+torrent-downloader/program.log
+torrent-downloader/build_output.txt
+torrent-downloader/*.mkv.part

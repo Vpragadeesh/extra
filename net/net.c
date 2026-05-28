@@ -19,7 +19,7 @@
 
 // Passive mode settings
 #define DOWNLOAD_DURATION 60  // seconds to download actively
-#define SLEEP_DURATION 10  // seconds to sleep between bursts
+#define SLEEP_DURATION 15  // seconds to sleep between bursts
 
 // Test file URLs
 static const char *TEST_FILES[] = {

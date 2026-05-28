@@ -3,19 +3,22 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+	pp "github.com/anacrolix/torrent/peer_protocol"
 	"github.com/schollz/progressbar/v3"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v2"
 )
 
@@ -35,8 +38,8 @@ func DefaultConfig() *Config {
 	return &Config{
 		OutputDir:   "/home/pragadeesh/Videos/",
 		MaxSpeed:    0, // unlimited
-		Connections: 100,
-		ChunkSize:   524288, // 512KB
+		Connections: 300,
+		ChunkSize:   16 * 1024,
 		Timeout:     30,
 		SaveResume:  true,
 		ResumeFile:  ".resume",
@@ -128,32 +131,95 @@ func (w *Worker) Download(reader io.Reader) error {
 
 // Manager handles torrent downloads
 type Manager struct {
-	client  *torrent.Client
-	config  *Config
-	limiter *Limiter
-	workers []*Worker
+	client      *torrent.Client
+	config      *Config
+	limiter     *Limiter
+	workers     []*Worker
+	activeTorr  *torrent.Torrent
+	downloadDir string
+	torrentHash string
 }
 
 // NewManager creates a new download manager
 func NewManager(client *torrent.Client, cfg *Config) *Manager {
 	limiter := NewLimiter(cfg.MaxSpeed)
 	return &Manager{
-		client:  client,
-		config:  cfg,
-		limiter: limiter,
-		workers: make([]*Worker, cfg.Connections),
+		client:      client,
+		config:      cfg,
+		limiter:     limiter,
+		workers:     make([]*Worker, cfg.Connections),
+		downloadDir: cfg.OutputDir,
 	}
 }
 
-// Download starts a torrent download
-func (m *Manager) Download(ctx context.Context, resource string) error {
+// Pause pauses the active download
+func (m *Manager) Pause() error {
+	if m.activeTorr == nil {
+		return fmt.Errorf("no active download")
+	}
+	m.activeTorr.Drop()
+	fmt.Println("[*] Download paused (torrent dropped from client)")
+	return nil
+}
+
+// Resume resumes a paused download - requires re-adding
+func (m *Manager) Resume() error {
+	return fmt.Errorf("use --resume flag to reload saved torrent")
+}
+
+// Status returns current download status
+func (m *Manager) Status() (string, int64, int64, error) {
+	if m.activeTorr == nil {
+		return "", 0, 0, fmt.Errorf("no active download")
+	}
+	info := m.activeTorr.Info()
+	if info == nil {
+		return "waiting for metadata", 0, 0, nil
+	}
+	completed := m.activeTorr.BytesCompleted()
+	total := info.TotalLength()
+	return info.Name, completed, total, nil
+}
+
+// SaveResumeData saves torrent info hash for resume
+func SaveResumeData(hash string) error {
+	return os.WriteFile(".fastdown_resume", []byte(hash), 0644)
+}
+
+// LoadResumeData loads saved torrent info hash
+func LoadResumeData() (string, error) {
+	data, err := os.ReadFile(".fastdown_resume")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// ClearResumeData removes saved resume data
+func ClearResumeData() error {
+	os.Remove(".fastdown_resume")
+	return nil
+}
+
+// SetActiveTorrent sets the active torrent for pause/resume
+func (m *Manager) SetActiveTorrent(t *torrent.Torrent) {
+	m.activeTorr = t
+	if t.Info() != nil {
+		m.torrentHash = hex.EncodeToString(m.activeTorr.InfoHash()[:])
+	}
+}
+
+// StartDownload begins a new download
+func (m *Manager) StartDownload(ctx context.Context, resource string, pauseImmediately bool) error {
 	var t *torrent.Torrent
 
-	// Parse magnet or torrent file
 	if len(resource) > 7 && resource[:7] == "magnet:" {
 		spec, err := torrent.TorrentSpecFromMagnetUri(resource)
 		if err != nil {
 			return fmt.Errorf("invalid magnet URI: %w", err)
+		}
+		if m.config.ChunkSize > 0 {
+			spec.ChunkSize = pp.Integer(m.config.ChunkSize)
 		}
 		var err2 error
 		t, _, err2 = m.client.AddTorrentSpec(spec)
@@ -161,7 +227,6 @@ func (m *Manager) Download(ctx context.Context, resource string) error {
 			return fmt.Errorf("failed to add torrent: %w", err2)
 		}
 	} else {
-		// For torrent files, read and get the metadata
 		data, err := os.ReadFile(resource)
 		if err != nil {
 			return fmt.Errorf("failed to read torrent file: %w", err)
@@ -170,44 +235,55 @@ func (m *Manager) Download(ctx context.Context, resource string) error {
 		if err != nil {
 			return fmt.Errorf("failed to parse torrent file: %w", err)
 		}
-		// Create a minimal spec from the metadata
-		spec := &torrent.TorrentSpec{
-			Trackers: mi.AnnounceList,
+		torrentHandle, err := m.client.AddTorrent(mi)
+		if err != nil {
+			return fmt.Errorf("failed to add torrent: %w", err)
 		}
-		var err2 error
-		t, _, err2 = m.client.AddTorrentSpec(spec)
-		if err2 != nil {
-			return fmt.Errorf("failed to add torrent: %w", err2)
-		}
+		t = torrentHandle
 	}
 
-	// Create output directory
 	if err := os.MkdirAll(m.config.OutputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Wait for metadata if needed
 	fmt.Println("[*] Waiting for torrent metadata...")
 	select {
 	case <-t.GotInfo():
-		// Metadata received
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-time.After(30 * time.Second):
-		// Give it a bit longer
 		fmt.Println("[*] Still waiting for metadata (this can take a while with magnet links)...")
 		<-t.GotInfo()
 	}
 
-	// Set up progress bar
 	info := t.Info()
 	if info == nil {
 		return fmt.Errorf("failed to get torrent info")
 	}
 
+	m.SetActiveTorrent(t)
+
 	fmt.Printf("[+] Starting download: %s\n", info.Name)
 	fmt.Printf("[+] Total size: %.2f MB\n", float64(info.TotalLength())/1024/1024)
-	fmt.Printf("[+] Output directory: %s\n", m.config.OutputDir)
+
+	if pauseImmediately {
+		t.Drop()
+		m.torrentHash = hex.EncodeToString(t.InfoHash()[:])
+		SaveResumeData(m.torrentHash)
+		return nil
+	}
+
+	return m.MonitorDownload(t, info)
+}
+
+// MonitorDownload watches and updates progress
+func (m *Manager) MonitorDownload(t *torrent.Torrent, info *metainfo.Info) error {
+	if info == nil {
+		info = t.Info()
+		if info == nil {
+			return fmt.Errorf("no torrent info")
+		}
+	}
 
 	bar := progressbar.NewOptions64(
 		info.TotalLength(),
@@ -229,54 +305,55 @@ func (m *Manager) Download(ctx context.Context, resource string) error {
 		}),
 	)
 
-	// Download all files concurrently with a wait group
-	var wg sync.WaitGroup
-	errChan := make(chan error, len(t.Files()))
+	t.DownloadAll()
 
-	for _, file := range t.Files() {
-		wg.Add(1)
-		go func(f *torrent.File) {
-			defer wg.Done()
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
 
-			outputPath := filepath.Join(m.config.OutputDir, f.Path())
-			if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-				errChan <- fmt.Errorf("failed to create directory: %w", err)
-				return
-			}
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 
-			out, err := os.Create(outputPath)
-			if err != nil {
-				errChan <- fmt.Errorf("failed to create file: %w", err)
-				return
-			}
-			defer out.Close()
-
-			reader := f.NewReader()
-			defer reader.Close()
-
-			_, err = io.CopyN(io.MultiWriter(out, bar), reader, f.Length())
-			if err != nil && err != io.EOF {
-				errChan <- fmt.Errorf("download failed for %s: %w", f.Path(), err)
-				return
-			}
-		}(file)
-	}
-
-	wg.Wait()
-	close(errChan)
-
-	// Check for errors
-	for err := range errChan {
-		if err != nil {
-			bar.Close()
-			return err
+	for {
+		select {
+		case <-t.Complete().On():
+			_ = bar.Set64(info.TotalLength())
+			bar.Finish()
+			ClearResumeData()
+			fmt.Printf("\n[done] Download complete: %s\n", info.Name)
+			return nil
+		case <-sigChan:
+			t.Drop()
+			m.torrentHash = hex.EncodeToString(t.InfoHash()[:])
+			SaveResumeData(m.torrentHash)
+			bar.Describe("[yellow][paused][reset]")
+			fmt.Println("\n[*] Download paused. Run with --resume to continue.")
+			select {}
+		case <-ticker.C:
+			stats := t.Stats()
+			bar.Describe(fmt.Sprintf("[cyan][downloading][reset] peers:%d/%d", stats.ActivePeers, stats.TotalPeers))
+			_ = bar.Set64(t.BytesCompleted())
 		}
 	}
-
-	bar.Finish()
-	fmt.Printf("\n[done] Download complete: %s\n", info.Name)
-	return nil
 }
+
+func NewTorrentClientConfig(cfg *Config) *torrent.ClientConfig {
+	clientConfig := torrent.NewDefaultClientConfig()
+	clientConfig.DataDir = cfg.OutputDir
+	clientConfig.EstablishedConnsPerTorrent = cfg.Connections
+	clientConfig.HalfOpenConnsPerTorrent = max(cfg.Connections/2, 50)
+	clientConfig.TotalHalfOpenConns = max(cfg.Connections, 100)
+	clientConfig.TorrentPeersHighWater = max(cfg.Connections*8, 1000)
+	clientConfig.TorrentPeersLowWater = max(cfg.Connections, 100)
+	clientConfig.MaxUnverifiedBytes = 512 << 20
+	clientConfig.PieceHashersPerTorrent = 4
+	clientConfig.DialRateLimiter = rate.NewLimiter(rate.Limit(max(cfg.Connections*2, 200)), max(cfg.Connections*2, 200))
+	if cfg.MaxSpeed > 0 {
+		clientConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(cfg.MaxSpeed), max(int(cfg.MaxSpeed), 64<<10))
+	}
+	return clientConfig
+}
+
+
 
 func main() {
 	app := &cli.App{
@@ -294,58 +371,113 @@ func main() {
 				Name:    "connections",
 				Aliases: []string{"C"},
 				Usage:   "Max concurrent connections",
-				Value:   100,
+				Value:   DefaultConfig().Connections,
 			},
 			&cli.StringFlag{
 				Name:    "output",
 				Aliases: []string{"o"},
 				Usage:   "Output directory",
 			},
+			&cli.BoolFlag{
+				Name:  "pause",
+				Usage: "Pause download immediately after starting",
+			},
+			&cli.BoolFlag{
+				Name:  "resume",
+				Usage: "Resume from saved state",
+			},
 		},
 		Action: func(c *cli.Context) error {
-			// Get the resource argument (magnet URI or torrent file)
-			resource := c.Args().Get(0)
-			if resource == "" {
-				cli.ShowAppHelp(c)
-				return fmt.Errorf("magnet URI or torrent file required")
-			}
+			resume := c.Bool("resume")
+			pause := c.Bool("pause")
 
+			// Load config
 			configPath := c.String("config")
 			outputDir := c.String("output")
 			maxConnections := c.Int("connections")
 
-			// Load config with defaults
 			cfg := DefaultConfig()
 			if data, err := os.ReadFile(configPath); err == nil {
 				yaml.Unmarshal(data, cfg)
 			}
 
-			// Expand tilde paths
 			if err := cfg.ExpandPath(); err != nil {
 				return fmt.Errorf("failed to expand config paths: %w", err)
 			}
 
-			// Override with flags
 			if outputDir != "" {
 				cfg.OutputDir = outputDir
 			}
 			if cfg.OutputDir == "" {
 				cfg.OutputDir = "."
 			}
-			if maxConnections > 0 {
+			if c.IsSet("connections") && maxConnections > 0 {
 				cfg.Connections = maxConnections
 			}
 
 			// Create torrent client
-			client, err := torrent.NewClient(nil)
+			client, err := torrent.NewClient(NewTorrentClientConfig(cfg))
 			if err != nil {
 				return fmt.Errorf("failed to create torrent client: %w", err)
 			}
 			defer client.Close()
 
-			// Download torrent
 			dm := NewManager(client, cfg)
-			return dm.Download(context.Background(), resource)
+
+			// Resume mode
+			if resume {
+				hash, err := LoadResumeData()
+				if err != nil {
+					return fmt.Errorf("no saved download to resume. run without --resume first")
+				}
+				var infoHash metainfo.Hash
+				decoded, err := hex.DecodeString(hash)
+				if err != nil || len(decoded) != 20 {
+					return fmt.Errorf("invalid stored hash: %s", hash)
+				}
+				copy(infoHash[:], decoded)
+				t, ok := client.Torrent(infoHash)
+				if !ok {
+					torrentFile := cfg.OutputDir + "/" + hash + ".torrent"
+					if data, err := os.ReadFile(torrentFile); err == nil {
+						mi, err := metainfo.Load(bytes.NewReader(data))
+						if err != nil {
+							return fmt.Errorf("failed to parse torrent file: %w", err)
+						}
+						var err2 error
+						t, _, err2 = client.AddTorrent(mi)
+						if err2 != nil {
+							return fmt.Errorf("failed to add torrent: %w", err2)
+						}
+					} else {
+						return fmt.Errorf("torrent file not found: %s", torrentFile)
+					}
+				}
+				dm.SetActiveTorrent(t)
+				t.DownloadAll()
+				return dm.MonitorDownload(t, nil)
+			}
+
+			// Normal download mode
+			resource := c.Args().Get(0)
+			if resource == "" {
+				cli.ShowAppHelp(c)
+				return fmt.Errorf("magnet URI or torrent file required")
+			}
+
+			err = dm.StartDownload(context.Background(), resource, pause)
+			if err != nil {
+				return err
+			}
+
+			if pause {
+				dm.activeTorr.Pause()
+				ClearResumeData()
+				SaveResumeData(dm.torrentHash)
+				fmt.Println("[*] Download paused. Run with --resume to continue.")
+				select {}
+			}
+			return nil
 		},
 	}
 
