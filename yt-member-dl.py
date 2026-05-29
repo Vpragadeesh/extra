@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import subprocess
+import concurrent.futures
 from pathlib import Path
 
 OUTPUT_DIR = Path.home() / "Videos" / "youtube-members"
@@ -26,15 +27,17 @@ def run_yt_dlp(args):
 def download_with_format_selection(url):
     # Detect playlist
     pl_count = 0
+    urls_to_download = [url]
     try:
         result = subprocess.run(
             ["yt-dlp", "-J", "--flat-playlist", url],
             capture_output=True, text=True, check=True
         )
         data = json.loads(result.stdout)
-        entries = data.get("entries", [])
+        entries = data.get("entries") or []
         if entries:
             pl_count = len(entries)
+            urls_to_download = [f"https://www.youtube.com/watch?v={e['id']}" for e in entries if 'id' in e]
     except Exception:
         pass
 
@@ -138,8 +141,13 @@ def download_with_format_selection(url):
     if merge_fmt:
         dl_args.extend(["--merge-output-format", merge_fmt])
 
-    dl_args.append(url)
-    run_yt_dlp(dl_args)
+    if len(urls_to_download) > 1:
+        print(f"\nStarting up to 3 concurrent downloads for {len(urls_to_download)} items...")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            dl_futures = [executor.submit(run_yt_dlp, dl_args + [u]) for u in urls_to_download]
+            concurrent.futures.wait(dl_futures)
+    else:
+        run_yt_dlp(dl_args + [urls_to_download[0]])
 
 
 def main():
