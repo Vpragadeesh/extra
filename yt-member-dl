@@ -139,7 +139,6 @@ print(len(d.get('entries',[])))")
     --remote-components ejs:github
     -f "$FORMAT"
     --embed-metadata
-    --embed-thumbnail
     --write-subs
     --write-auto-subs
     --sub-langs "en.*"
@@ -147,12 +146,8 @@ print(len(d.get('entries',[])))")
     --download-archive "$ARCHIVE_FILE"
     -o "$OUTPUT_TEMPLATE"
   )
-  if [ "$EMBED_THUMB" -eq 0 ]; then
-    for i in "${!DL_ARGS[@]}"; do
-      if [ "${DL_ARGS[$i]}" = "--embed-thumbnail" ]; then
-        unset 'DL_ARGS[i]'
-      fi
-    done
+  if [ "$EMBED_THUMB" -eq 1 ]; then
+    DL_ARGS+=(--embed-thumbnail)
   fi
   if [ "$EXTRACT_AUDIO" -eq 1 ]; then
     DL_ARGS+=(--extract-audio --audio-format "$AUDIO_FORMAT" --audio-quality "$AUDIO_QUALITY")
@@ -164,7 +159,7 @@ print(len(d.get('entries',[])))")
 }
 
 # Main logic
-if [ "$1" = "-a" ]; then
+  if [ "$1" = "-a" ]; then
   # Batch mode: non-interactive, use defaults
   shift
   if [ "$#" -eq 0 ]; then
@@ -178,7 +173,6 @@ if [ "$1" = "-a" ]; then
     --remote-components ejs:github
     -f "$FORMAT"
     --embed-metadata
-    --embed-thumbnail
     --write-subs
     --write-auto-subs
     --sub-langs "en.*"
@@ -199,7 +193,6 @@ else
     --remote-components ejs:github
     -f "$FORMAT"
     --embed-metadata
-    --embed-thumbnail
     --write-subs
     --write-auto-subs
     --sub-langs "en.*"
