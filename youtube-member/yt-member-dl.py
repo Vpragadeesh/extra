@@ -28,9 +28,20 @@ def download_with_format_selection(url):
     # Detect playlist
     pl_count = 0
     urls_to_download = [url]
+    cookie_file = str(OUTPUT_DIR / "temp_cookies.txt")
+    
+    # Force getting fresh cookies explicitly to address expiration/ban
+    print("Exporting fresh cookies from Firefox...")
+    try:
+        if os.path.exists(cookie_file):
+            os.remove(cookie_file)
+        subprocess.run(["yt-dlp", "--cookies-from-browser", "firefox", "--sleep-requests", "2", "--cookies", cookie_file, "--sleep-requests", "2", "--skip-download", "https://www.youtube.com/"], capture_output=True, check=False)
+    except Exception:
+        pass
+
     try:
         result = subprocess.run(
-            ["yt-dlp", "-J", "--flat-playlist", url],
+            ["yt-dlp", "--cookies", cookie_file, "--sleep-requests", "2", "-J", "--flat-playlist", url],
             capture_output=True, text=True, check=True
         )
         data = json.loads(result.stdout)
@@ -122,7 +133,7 @@ def download_with_format_selection(url):
     print(f"URL: {url}\n")
 
     dl_args = [
-        "--cookies-from-browser", "firefox",
+        "--cookies", cookie_file, "--sleep-requests", "2",
         "--remote-components", "ejs:github",
         "-f", fmt,
         "--embed-metadata",
@@ -142,9 +153,18 @@ def download_with_format_selection(url):
         dl_args.extend(["--merge-output-format", merge_fmt])
 
     if len(urls_to_download) > 1:
-        print(f"\nStarting up to 3 concurrent downloads for {len(urls_to_download)} items...")
+        total = len(urls_to_download)
+        print(f"\nStarting up to 3 concurrent downloads for {total} items...")
+        
+        completed = 0
+        def download_and_track(u):
+            nonlocal completed
+            run_yt_dlp(dl_args + [u])
+            completed += 1
+            print(f"--- [Progress: {completed} / {total} downloaded/checked] ---")
+            
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            dl_futures = [executor.submit(run_yt_dlp, dl_args + [u]) for u in urls_to_download]
+            dl_futures = [executor.submit(download_and_track, u) for u in urls_to_download]
             concurrent.futures.wait(dl_futures)
     else:
         run_yt_dlp(dl_args + [urls_to_download[0]])
@@ -165,7 +185,7 @@ def main():
         output_template = str(OUTPUT_DIR / "%(channel)s" / "%(playlist_title|Single Videos)s" / "%(title)s [%(id)s].%(ext)s")
         
         dl_args = [
-            "--cookies-from-browser", "firefox",
+            "--cookies-from-browser", "firefox", "--sleep-requests", "2",
             "--remote-components", "ejs:github",
             "-f", fmt,
             "--embed-metadata",
@@ -190,7 +210,7 @@ def main():
         output_template = str(OUTPUT_DIR / "%(channel)s" / "%(playlist_title|Single Videos)s" / "%(title)s [%(id)s].%(ext)s")
         
         dl_args = [
-            "--cookies-from-browser", "firefox",
+            "--cookies-from-browser", "firefox", "--sleep-requests", "2",
             "--remote-components", "ejs:github",
             "-f", fmt,
             "--embed-metadata",
