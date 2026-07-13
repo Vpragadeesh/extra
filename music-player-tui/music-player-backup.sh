@@ -26,7 +26,7 @@ select_folder() {
 get_songs() {
     shopt -s nullglob
     mapfile -t songs < <(find "$MUSIC_ROOT/$FOLDER" -maxdepth 1 -type f \
-        \( -iname \*.mp3 -o -iname \*.wav -o -iname \*.flac -o -iname \*.aac -o -iname \*.ogg \) | sort)
+        \( -iname \*.mp3 -o -iname \*.wav -o -iname \*.flac -o -iname \*.aac -o -iname \*.ogg \) -printf '%T@ %p\n' | sort -n | sed 's/^[0-9.]* //')
     if [[ ${#songs[@]} -eq 0 ]]; then
         echo "No songs found in folder '$FOLDER'"
         exit 1

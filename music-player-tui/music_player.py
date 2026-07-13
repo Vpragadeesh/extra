@@ -101,7 +101,7 @@ def get_songs():
         found_songs.extend(folder_path.glob(f"*{ext}"))
         found_songs.extend(folder_path.glob(f"*{ext.upper()}"))
 
-    songs = sorted(list(set(found_songs))) # Use set to remove duplicates
+    songs = sorted(set(found_songs), key=lambda p: p.stat().st_mtime)
 
     if not songs:
         print(f"No songs found in folder '{current_folder}'")
@@ -166,23 +166,37 @@ def play_song():
         stderr=subprocess.DEVNULL,
     )
 
-    time.sleep(1) # Wait for mpv to start and create the socket
+    # Wait for mpv to start and create the socket
+    time.sleep(2)
     needs_full_redraw = True
+
+_mpv_request_id = 0
 
 def send_mpv_command(command):
     """Send a command to the mpv IPC socket."""
+    global _mpv_request_id
     if not MPV_SOCKET.exists():
         return None
     try:
+        _mpv_request_id += 1
+        payload = {**command, "request_id": _mpv_request_id}
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-            s.settimeout(0.5)
+            s.settimeout(2)
             s.connect(str(MPV_SOCKET))
-            s.sendall(json.dumps(command).encode('utf-8') + b'\n')
-            response_data = s.recv(4096)
-            if response_data:
-                return json.loads(response_data)
+            s.sendall(json.dumps(payload).encode('utf-8') + b'\n')
+            # Read until we get a complete newline-terminated response
+            buf = b''
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+                if b'\n' in buf:
+                    # Return the first complete JSON line
+                    line = buf.split(b'\n')[0]
+                    return json.loads(line)
             return None
-    except (ConnectionRefusedError, FileNotFoundError, BrokenPipeError, socket.timeout):
+    except (ConnectionRefusedError, FileNotFoundError, BrokenPipeError, socket.timeout, OSError):
         return None
 
 def get_mpv_property(prop):

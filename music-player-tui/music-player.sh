@@ -8,7 +8,7 @@ numeric_prefix=""
 # Select default folder as 'Unni_Menon' if available, else prompt user
 select_default_folder() {
     if [[ -d "$MUSIC_ROOT/Unni_Menon/" ]]; then
-        FOLDER="Unni_Menon"
+        FOLDER="S.P.B Golden Melodies (Tamil)"
     else
         echo "Default folder 'Unni_Menon' not found. Please select a folder:"
         select_folder
@@ -26,7 +26,7 @@ select_folder() {
 get_songs() {
     shopt -s nullglob
     mapfile -t songs < <(find "$MUSIC_ROOT/$FOLDER" -maxdepth 1 -type f \
-        \( -iname \*.mp3 -o -iname \*.wav -o -iname \*.flac -o -iname \*.aac -o -iname \*.ogg \) | sort)
+        \( -iname \*.mp3 -o -iname \*.wav -o -iname \*.flac -o -iname \*.aac -o -iname \*.ogg \) -printf '%T@ %p\n' | sort -n | sed 's/^[0-9.]* //')
     if [[ ${#songs[@]} -eq 0 ]]; then
         echo "No songs found in folder '$FOLDER'"
         exit 1
@@ -43,7 +43,7 @@ play_song() {
 
     # Convert absolute path to relative path from music_directory
     local relative_path="${song_path#$MUSIC_ROOT/}"
-    
+
     # Add the song (relative to music directory) and play
     mpc add "$relative_path" >/dev/null 2>&1
     mpc play >/dev/null 2>&1
@@ -79,8 +79,13 @@ get_time_info() {
     if [[ "$status_line" =~ ([0-9]+:[0-5][0-9])/([0-9]+:[0-5][0-9]) ]]; then
         local cur="${BASH_REMATCH[1]}"
         local tot="${BASH_REMATCH[2]}"
-        local cur_s=$(( ${cur%%:*} * 60 + ${cur##*:} ))
-        local tot_s=$(( ${tot%%:*} * 60 + ${tot##*:} ))
+        # Strip leading zeros to avoid octal interpretation (e.g. 09 -> 9)
+        local cur_min=$((10#${cur%%:*}))
+        local cur_sec=$((10#${cur##*:}))
+        local tot_min=$((10#${tot%%:*}))
+        local tot_sec=$((10#${tot##*:}))
+        local cur_s=$(( cur_min * 60 + cur_sec ))
+        local tot_s=$(( tot_min * 60 + tot_sec ))
         echo "$cur_s $tot_s"
     else
         echo "0 0"
@@ -115,9 +120,13 @@ get_song_info() {
 
 # Format seconds to MM:SS
 format_time() {
-    local seconds=$1
-    local mins=$((${seconds%.*}/60))
-    local secs=$((${seconds%.*}%60))
+    local seconds=${1:-0}
+    # Strip leading zeros and non-numeric characters
+    seconds=${seconds%%.*}
+    seconds=${seconds##+([!0-9])}
+    seconds=${seconds:-0}
+    local mins=$((10#$seconds / 60))
+    local secs=$((10#$seconds % 60))
     printf "%02d:%02d" $mins $secs
 }
 
@@ -322,6 +331,10 @@ trap cleanup SIGINT SIGTERM
 
 # --- Script Initialization ---
 
+# Sync mpd database so all files on disk are available
+mpc update --quiet 2>/dev/null
+sleep 1
+
 select_default_folder
 get_songs
 
@@ -359,15 +372,12 @@ while true; do
         last_progress_update=$current_time
     fi
 
-    # Check mpd/mpc playback state; if playback stopped (and we had started), advance
+    # Check mpd/mpc playback state; if playback stopped, advance to next song
     status_line=$(mpc status 2>/dev/null | sed -n '2p')
-    if ! echo "$status_line" | grep -q '\[playing\]' && ! echo "$status_line" | grep -q '\[paused\]'; then
-        position_percent=$(get_playback_position)
-        if [[ "$position_percent" != "0" ]]; then
-            ((index=(index+1)%${#songs[@]}))
-            play_song
-            continue
-        fi
+    if [[ -z "$status_line" ]] || (! echo "$status_line" | grep -q '\[playing\]' && ! echo "$status_line" | grep -q '\[paused\]'); then
+        ((index=(index+1)%${#songs[@]}))
+        play_song
+        continue
     fi
 
     # Read user input with timeout (non-blocking)
