@@ -13,12 +13,19 @@ Fast Chunk Downloader is a Go-based torrent downloader built with `anacrolix/tor
 ## Project Structure
 
 ```
-fastdown
-├── main.go             # Single file application
-├── go.mod              # Go module definition
-├── go.sum              # Go dependencies
-├── configs
-│   └── config.yaml     # Runtime configuration
+torrent-downloader/
+├── main.go              # Entry point — parses CLI flags, bootstraps app
+├── config/
+│   └── config.go        # Config struct, YAML loading, defaults, path expansion
+├── manager/
+│   ├── manager.go       # Download manager — orchestrates torrent client
+│   └── limiter.go       # Bandwidth rate limiter
+├── ui/
+│   └── progress.go      # Progress bar, live stats display
+├── configs/
+│   └── config.yaml      # Runtime defaults
+├── go.mod
+├── go.sum
 └── README.md
 ```
 
@@ -36,7 +43,7 @@ fastdown
 
 ## Configuration
 
-Edit `configs/config.yaml` to control the download rate limit, output directory, and other defaults. Missing fields fall back to the defaults defined in `main.go`.
+Edit `configs/config.yaml` to control the download rate limit, output directory, and other defaults. Missing fields fall back to the defaults defined in `config/config.go`.
 
 ## Usage
 
@@ -50,9 +57,9 @@ Download from a local torrent file:
 ./fastdown ./archlinux-2026.01.01-x86_64.iso.torrent
 ```
 
-Specify custom output directory:
+Specify custom output directory and speed limit (in KB/s):
 ```
-./fastdown --output ~/Downloads ./archlinux-2026.01.01-x86_64.iso.torrent
+./fastdown --output ~/Downloads --speed 5000 ./archlinux-2026.01.01-x86_64.iso.torrent
 ```
 
 ## Contributing
