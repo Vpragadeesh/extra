@@ -1,0 +1,18 @@
+[Unit]
+Description=Local Activity Monitor API and collectors
+After=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/extra/activity-monitor/backend
+ExecStart=%h/extra/activity-monitor/backend/.venv/bin/python -m activity_monitor
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+Environment=ACTIVITY_MONITOR_DB=%h/.local/share/activity-monitor/activity.db
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

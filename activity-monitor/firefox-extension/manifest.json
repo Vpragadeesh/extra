@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Local Activity Monitor",
+  "version": "0.1.0",
+  "description": "Tracks active tab metadata and estimated active time to your local Linux Activity Monitor.",
+  "permissions": ["tabs", "storage", "idle"],
+  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "background": { "scripts": ["background.js"] },
+  "browser_specific_settings": { "gecko": { "id": "local-activity-monitor@example.local", "strict_min_version": "128.0" } }
+}
