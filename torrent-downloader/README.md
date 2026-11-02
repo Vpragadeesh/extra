@@ -1,71 +1,72 @@
-# Fast Chunk Downloader
+# FastDown - Torrent Downloader
 
-Fast Chunk Downloader is a Go-based torrent downloader built with `anacrolix/torrent`. The application uses `configs/config.yaml` for configuration defaults.
+A lightweight, ultra-fast, Terminal User Interface (TUI) based torrent downloader built in Go. It uses `anacrolix/torrent` as the core download engine and `charmbracelet/bubbletea` for a rich, responsive console interface.
 
 ## Features
 
-- Magnet link and `.torrent` file support
-- YAML configuration with sensible defaults
-- Live progress display with percentage, speed, and ETA
-- Download rate limiting
-- Simple CLI via `urfave/cli`
+- **TUI Dashboard:** Live progress bar, speed metrics, peer tracking, and pieces health.
+- **Ultra-Fast NVMe-Optimized:** Tuned buffer settings (`MaxUnverifiedBytes`) to flush downloaded data directly to disk instead of accumulating in RAM.
+- **Instant Resume:** BoltDB-backed persistence records verified pieces, eliminating the need to re-hash the entire file on restart.
+- **Multi-Threaded & Connection Heavy:** Allows up to 500 connections (default 300) with 8 piece hashers for maximum throughput.
+- **Bandwidth Control:** Change download speed limits dynamically with hotkeys.
 
-## Project Structure
+## Interface
 
-```
-torrent-downloader/
-├── main.go              # Entry point — parses CLI flags, bootstraps app
-├── config/
-│   └── config.go        # Config struct, YAML loading, defaults, path expansion
-├── manager/
-│   ├── manager.go       # Download manager — orchestrates torrent client
-│   └── limiter.go       # Bandwidth rate limiter
-├── ui/
-│   └── progress.go      # Progress bar, live stats display
-├── configs/
-│   └── config.yaml      # Runtime defaults
-├── go.mod
-├── go.sum
-└── README.md
-```
+The TUI displays:
+- Download progress (Size, GB and percentage)
+- Real-time download/upload speed (↓/↑)
+- Current speed limit configuration
+- Active and total peers, plus connected seeders
+- Piece verification stats (Good vs Bad/Wasted chunks)
+
+### Keybindings
+| Key | Action |
+|-----|--------|
+| `q` / `ctrl+c` | Quit gracefully (saves resume state) |
+| `p` | Pause / Resume |
+| `+` / `=` | Increase speed limit by 1 MB/s |
+| `-` | Decrease speed limit by 1 MB/s |
+| `0` | Remove speed limit (unlimited) |
 
 ## Installation
 
-1. Build the project:
-   ```
-   go build -o fastdown main.go
-   ```
+You need Go 1.24+ installed.
 
-2. Run the downloader:
-   ```
-   ./fastdown <magnet-uri-or-torrent-file>
-   ```
-
-## Configuration
-
-Edit `configs/config.yaml` to control the download rate limit, output directory, and other defaults. Missing fields fall back to the defaults defined in `config/config.go`.
+```bash
+git clone <repo>
+cd torrent-downloader
+go build -o fastdown ./main.go
+```
 
 ## Usage
 
-Download from a magnet link:
-```
+```bash
+# Basic usage (magnet link)
 ./fastdown "magnet:?xt=urn:btih:..."
+
+# Custom output directory
+./fastdown --output ~/Downloads "magnet:?xt=urn:btih:..."
+
+# Limit speed to 5000 KB/s
+./fastdown --speed 5000 "magnet:?xt=urn:btih:..."
+
+# Maximize connections
+./fastdown --connections 1000 "magnet:?xt=urn:btih:..."
 ```
 
-Download from a local torrent file:
+## Configuration
+
+You can also use a YAML config file (default: `configs/config.yaml`):
+
+```yaml
+output_dir: "~/Videos"
+connections: 300
+timeout_seconds: 30
+tui_refresh_ms: 250
+theme: "dark"
 ```
-./fastdown ./archlinux-2026.01.01-x86_64.iso.torrent
+
+Pass the config file with `-c` or `--config`:
+```bash
+./fastdown -c custom_config.yaml "magnet:..."
 ```
-
-Specify custom output directory and speed limit (in KB/s):
-```
-./fastdown --output ~/Downloads --speed 5000 ./archlinux-2026.01.01-x86_64.iso.torrent
-```
-
-## Contributing
-
-Contributions are welcome. Please open an issue or submit a pull request for fixes or improvements.
-
-## License
-
-This project is licensed under the MIT License. See the LICENSE file for details.

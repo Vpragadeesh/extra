@@ -1,7 +1,30 @@
 # max_speed: 0                    # 0 = unlimited; bytes per second when limited
-# chunk_size: 16384               # 16 KiB request chunk size
-# connections: 300                # Max peer connections per torrent
-# output_dir: "~/Videos"          # Output directory (supports ~ expansion)
-# timeout_seconds: 30             # Connection timeout in seconds
-# save_resume: true               # Save resume information
-# resume_file: ".resume"          # Resume file location
+# max_upload_speed: 0             # 0 = auto (~15% of download, or 1 MB/s if unlimited)
+chunk_size: 16384               # 16 KiB request chunk size
+connections: 100                # Max peer connections per torrent
+output_dir: "~/Videos"          # Output directory (supports ~ expansion)
+timeout_seconds: 120            # Metadata timeout in seconds (0 = wait forever)
+save_resume: true               # Save resume information
+resume_file: ".resume"          # Resume file location
+tui_refresh_ms: 250             # TUI refresh rate
+theme: "dark"                   # Color theme
+listen_port: 0                  # BitTorrent listen port (0 = OS picks free port)
+log_file: "fastdown.log"        # Library logs go here, NOT the terminal (prevents TUI corruption). 'none' = discard
+
+# Multi-network settings (auto-populated on first run, or configure manually)
+# network_preferences:
+#   wlp2s0:                       # WiFi interface example
+#     custom_name: "WiFi"
+#     off: false
+#     speed_limit: 0
+#     data_limit: 0
+#     data_limit_period: "month"
+#   enp3s0:                       # Ethernet interface example
+#     custom_name: "Ethernet"
+#     off: false
+#     speed_limit: 0
+#     data_limit: 0
+#     data_limit_period: "month"
+# global_speed_limit: 0           # Global speed limit across all networks (bytes/sec)
+# slow_mode: false
+# slow_mode_speed: 2097152        # 2 MiB/s when slow mode enabled

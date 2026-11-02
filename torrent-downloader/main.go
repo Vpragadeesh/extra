@@ -1,278 +1,44 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/anacrolix/torrent"
-	"github.com/anacrolix/torrent/metainfo"
-	pp "github.com/anacrolix/torrent/peer_protocol"
-	"github.com/schollz/progressbar/v3"
+	"torrent-downloader/config"
+	"torrent-downloader/manager"
+	"torrent-downloader/tui"
+
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/urfave/cli/v2"
-	"golang.org/x/time/rate"
-	"gopkg.in/yaml.v2"
 )
 
-// Config holds application settings
-type Config struct {
-	OutputDir   string `yaml:"output_dir"`
-	MaxSpeed    int64  `yaml:"max_speed"` // bytes per second
-	Connections int    `yaml:"connections"`
-	ChunkSize   int64  `yaml:"chunk_size"`
-	Timeout     int    `yaml:"timeout_seconds"`
-	SaveResume  bool   `yaml:"save_resume"`
-	ResumeFile  string `yaml:"resume_file"`
-}
-
-// DefaultConfig returns the default configuration
-func DefaultConfig() *Config {
-	return &Config{
-		OutputDir:   "/home/pragadeesh/Videos/",
-		MaxSpeed:    0, // unlimited
-		Connections: 300,
-		ChunkSize:   16 * 1024,
-		Timeout:     30,
-		SaveResume:  true,
-		ResumeFile:  ".resume",
+// configRedirect points fd 2 at the log file (see config.LogFile) and returns
+// a writable file for the REAL terminal that was fd 2 at process start — used
+// for startup errors that must be visible before/without the TUI.
+func configRedirect(logPath string) *os.File {
+	logPath = strings.TrimSpace(logPath)
+	if logPath == "" {
+		logPath = "fastdown.log"
 	}
-}
-
-// ExpandPath expands ~ to the home directory
-func (c *Config) ExpandPath() error {
-	if c.OutputDir != "" && strings.HasPrefix(c.OutputDir, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return err
-		}
-		c.OutputDir = filepath.Join(home, c.OutputDir[1:])
-	}
-	return nil
-}
-
-// Limiter provides bandwidth rate limiting
-type Limiter struct {
-	maxBytesPerSec int64
-	lastTime       time.Time
-	bytesSent      int64
-}
-
-// NewLimiter creates a new bandwidth limiter
-func NewLimiter(maxBytesPerSec int64) *Limiter {
-	return &Limiter{
-		maxBytesPerSec: maxBytesPerSec,
-		lastTime:       time.Now(),
-	}
-}
-
-// Wait blocks if necessary to enforce the rate limit
-func (l *Limiter) Wait(bytes int64) {
-	if l.maxBytesPerSec <= 0 {
-		return // No limit
-	}
-
-	l.bytesSent += bytes
-	now := time.Now()
-	elapsed := now.Sub(l.lastTime).Seconds()
-
-	if elapsed >= 1.0 {
-		l.bytesSent = 0
-		l.lastTime = now
-		return
-	}
-
-	allowedBytes := int64(float64(l.maxBytesPerSec) * elapsed)
-	if l.bytesSent > allowedBytes {
-		sleepTime := time.Duration(float64(time.Second) * float64(l.bytesSent-allowedBytes) / float64(l.maxBytesPerSec))
-		time.Sleep(sleepTime)
-	}
-}
-
-// Worker handles chunk downloads
-type Worker struct {
-	id     int
-	file   *os.File
-	offset int64
-	size   int64
-	done   chan error
-}
-
-// NewWorker creates a new worker
-func NewWorker(id int, file *os.File, offset, size int64) *Worker {
-	return &Worker{
-		id:     id,
-		file:   file,
-		offset: offset,
-		size:   size,
-		done:   make(chan error, 1),
-	}
-}
-
-// Download downloads a chunk
-func (w *Worker) Download(reader io.Reader) error {
-	if _, err := w.file.Seek(w.offset, 0); err != nil {
-		return err
-	}
-
-	_, err := io.CopyN(w.file, reader, w.size)
-	if err != nil && err != io.EOF {
-		return err
-	}
-	return nil
-}
-
-// Manager handles torrent downloads
-type Manager struct {
-	client  *torrent.Client
-	config  *Config
-	limiter *Limiter
-	workers []*Worker
-}
-
-// NewManager creates a new download manager
-func NewManager(client *torrent.Client, cfg *Config) *Manager {
-	limiter := NewLimiter(cfg.MaxSpeed)
-	return &Manager{
-		client:  client,
-		config:  cfg,
-		limiter: limiter,
-		workers: make([]*Worker, cfg.Connections),
-	}
-}
-
-func NewTorrentClientConfig(cfg *Config) *torrent.ClientConfig {
-	clientConfig := torrent.NewDefaultClientConfig()
-	clientConfig.DataDir = cfg.OutputDir
-	clientConfig.EstablishedConnsPerTorrent = cfg.Connections
-	clientConfig.HalfOpenConnsPerTorrent = max(cfg.Connections/2, 50)
-	clientConfig.TotalHalfOpenConns = max(cfg.Connections, 100)
-	clientConfig.TorrentPeersHighWater = max(cfg.Connections*8, 1000)
-	clientConfig.TorrentPeersLowWater = max(cfg.Connections, 100)
-	clientConfig.MaxUnverifiedBytes = 512 << 20
-	clientConfig.PieceHashersPerTorrent = 4
-	clientConfig.DialRateLimiter = rate.NewLimiter(rate.Limit(max(cfg.Connections*2, 200)), max(cfg.Connections*2, 200))
-	if cfg.MaxSpeed > 0 {
-		clientConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(cfg.MaxSpeed), max(int(cfg.MaxSpeed), 64<<10))
-	}
-	return clientConfig
-}
-
-// Download starts a torrent download
-func (m *Manager) Download(ctx context.Context, resource string) error {
-	var t *torrent.Torrent
-
-	// Parse magnet or torrent file
-	if len(resource) > 7 && resource[:7] == "magnet:" {
-		spec, err := torrent.TorrentSpecFromMagnetUri(resource)
-		if err != nil {
-			return fmt.Errorf("invalid magnet URI: %w", err)
-		}
-		if m.config.ChunkSize > 0 {
-			spec.ChunkSize = pp.Integer(m.config.ChunkSize)
-		}
-		var err2 error
-		t, _, err2 = m.client.AddTorrentSpec(spec)
-		if err2 != nil {
-			return fmt.Errorf("failed to add torrent: %w", err2)
-		}
-	} else {
-		// For torrent files, read and get the metadata
-		data, err := os.ReadFile(resource)
-		if err != nil {
-			return fmt.Errorf("failed to read torrent file: %w", err)
-		}
-		mi, err := metainfo.Load(bytes.NewReader(data))
-		if err != nil {
-			return fmt.Errorf("failed to parse torrent file: %w", err)
-		}
-		torrentHandle, err := m.client.AddTorrent(mi)
-		if err != nil {
-			return fmt.Errorf("failed to add torrent: %w", err)
-		}
-		t = torrentHandle
-	}
-
-	// Create output directory
-	if err := os.MkdirAll(m.config.OutputDir, 0755); err != nil {
-		return fmt.Errorf("failed to create output directory: %w", err)
-	}
-
-	// Wait for metadata if needed
-	fmt.Println("[*] Waiting for torrent metadata...")
-	select {
-	case <-t.GotInfo():
-		// Metadata received
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(30 * time.Second):
-		// Give it a bit longer
-		fmt.Println("[*] Still waiting for metadata (this can take a while with magnet links)...")
-		<-t.GotInfo()
-	}
-
-	// Set up progress bar
-	info := t.Info()
-	if info == nil {
-		return fmt.Errorf("failed to get torrent info")
-	}
-
-	fmt.Printf("[+] Starting download: %s\n", info.Name)
-	fmt.Printf("[+] Total size: %.2f MB\n", float64(info.TotalLength())/1024/1024)
-	fmt.Printf("[+] Output directory: %s\n", m.config.OutputDir)
-
-	bar := progressbar.NewOptions64(
-		info.TotalLength(),
-		progressbar.OptionSetDescription("[cyan][downloading][reset]"),
-		progressbar.OptionSetWriter(os.Stderr),
-		progressbar.OptionSetWidth(50),
-		progressbar.OptionThrottle(250*time.Millisecond),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionShowCount(),
-		progressbar.OptionSetPredictTime(true),
-		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionUseANSICodes(true),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "=",
-			SaucerHead:    "[green]>[reset]",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}),
-	)
-
-	t.DownloadAll()
-
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			bar.Close()
-			return ctx.Err()
-		case <-t.Complete().On():
-			_ = bar.Set64(info.TotalLength())
-			bar.Finish()
-			fmt.Printf("\n[done] Download complete: %s\n", info.Name)
-			return nil
-		case <-ticker.C:
-			stats := t.Stats()
-			bar.Describe(fmt.Sprintf("[cyan][downloading][reset] peers:%d/%d", stats.ActivePeers, stats.TotalPeers))
-			_ = bar.Set64(t.BytesCompleted())
+	saved := configOpenLogDup(logPath)
+	if saved > 0 {
+		// os.NewFile on the saved descriptor number so writes target the
+		// original physical stderr even after the dup3 replacement.
+		f := os.NewFile(uintptr(saved), "/dev/stderr-real")
+		if f != nil {
+			return f
 		}
 	}
+	return os.Stderr
 }
 
 func main() {
 	app := &cli.App{
 		Name:      "fastdown",
-		Usage:     "Fast torrent downloader with speed control",
+		Usage:     "Ultra-fast torrent downloader (TUI)",
 		ArgsUsage: "[magnet URI or torrent file path]",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -285,30 +51,51 @@ func main() {
 				Name:    "connections",
 				Aliases: []string{"C"},
 				Usage:   "Max concurrent connections",
-				Value:   DefaultConfig().Connections,
+				Value:   300,
 			},
 			&cli.StringFlag{
 				Name:    "output",
 				Aliases: []string{"o"},
 				Usage:   "Output directory",
 			},
+			&cli.Int64Flag{
+				Name:    "speed",
+				Aliases: []string{"s"},
+				Usage:   "Max download speed in KB/s (0 = unlimited)",
+				Value:   0,
+			},
+			&cli.Int64Flag{
+				Name:    "upload-speed",
+				Aliases: []string{"u"},
+				Usage:   "Max upload speed in KB/s (0 = auto ~15% of download, or 1 MB/s if unlimited)",
+				Value:   0,
+			},
+			&cli.IntFlag{
+				Name:    "port",
+				Aliases: []string{"p"},
+				Usage:   "Listen port for BitTorrent connections (0 = OS-assigned, avoids conflicts)",
+				Value:   0,
+			},
+			&cli.StringFlag{
+				Name:    "log",
+				Aliases: []string{"L"},
+				Usage:   "File for internal torrent-library logs (default from config; 'none' discards)",
+			},
 		},
 		Action: func(c *cli.Context) error {
-			// Get the resource argument (magnet URI or torrent file)
+			// Optional: pre-load a magnet/torrent if provided on CLI
 			resource := c.Args().Get(0)
-			if resource == "" {
-				cli.ShowAppHelp(c)
-				return fmt.Errorf("magnet URI or torrent file required")
-			}
 
 			configPath := c.String("config")
 			outputDir := c.String("output")
 			maxConnections := c.Int("connections")
+			maxSpeedKBps := c.Int64("speed")
+			listenPort := c.Int("port")
 
 			// Load config with defaults
-			cfg := DefaultConfig()
-			if data, err := os.ReadFile(configPath); err == nil {
-				yaml.Unmarshal(data, cfg)
+			cfg, err := config.LoadConfig(configPath)
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
 			}
 
 			// Expand tilde paths
@@ -326,17 +113,52 @@ func main() {
 			if c.IsSet("connections") && maxConnections > 0 {
 				cfg.Connections = maxConnections
 			}
-
-			// Create torrent client
-			client, err := torrent.NewClient(NewTorrentClientConfig(cfg))
-			if err != nil {
-				return fmt.Errorf("failed to create torrent client: %w", err)
+			if c.IsSet("speed") {
+				cfg.MaxSpeed = maxSpeedKBps * 1024
 			}
-			defer client.Close()
+			if c.IsSet("upload-speed") {
+				cfg.MaxUploadSpeed = c.Int64("upload-speed") * 1024
+			}
+			if c.IsSet("port") {
+				cfg.ListenPort = listenPort
+			}
 
-			// Download torrent
-			dm := NewManager(client, cfg)
-			return dm.Download(context.Background(), resource)
+			// Redirect fd 2 (stderr) to the log file BEFORE creating the torrent
+			// client. The library logs every blocked/failed tracker announce
+			// straight to stderr; with the TUI on the alt screen those writes
+			// paint over (mix with) the interface. Everything now lands in the
+			// log file instead — including Go panics, which are the most useful
+			// thing to capture. Errors printed via `realErr` still reach the
+			// physical terminal.
+			logPath := cfg.LogFile
+			if c.IsSet("log") {
+				logPath = c.String("log")
+			}
+			realErr := configRedirect(logPath)
+
+			// Initialize manager — print errors directly so they are visible
+			// BEFORE the alternate screen (TUI) takes over.
+			dm, err := manager.NewManager(cfg)
+			if err != nil {
+				fmt.Fprintf(realErr, "\n\033[31mERROR:\033[0m %v\n", err)
+				if cfg.ListenPort != 0 {
+					fmt.Fprintf(realErr, "Tip: try a different --port, or use --port 0 to let the OS pick one.\n")
+				} else {
+					fmt.Fprintf(realErr, "Tip: another fastdown instance may still be running.\n")
+				}
+				return err
+			}
+			defer dm.Close()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// Launch the TUI
+			model := tui.NewModel(dm, cfg, ctx, cancel, resource)
+			p := tea.NewProgram(model, tea.WithAltScreen())
+
+			_, err = p.Run()
+			return err
 		},
 	}
 
